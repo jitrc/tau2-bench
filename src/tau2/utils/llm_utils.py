@@ -23,6 +23,7 @@ from tau2.config import (
 from tau2.data_model.message import (
     AssistantMessage,
     Message,
+    MultiToolMessage,
     SystemMessage,
     ToolCall,
     ToolMessage,
@@ -279,11 +280,15 @@ def get_token_usage(messages: list[Message]) -> dict:
     """
     usage = {"completion_tokens": 0, "prompt_tokens": 0}
     for message in messages:
-        if isinstance(message, ToolMessage):
+        # Skip message types that don't have usage tracking
+        if isinstance(message, (ToolMessage, MultiToolMessage, SystemMessage)):
             continue
-        if message.usage is None:
+
+        # Only AssistantMessage and UserMessage have usage attribute
+        if not hasattr(message, 'usage') or message.usage is None:
             logger.warning(f"Message {message.role}: {message.content} has no usage")
             continue
+
         usage["completion_tokens"] += message.usage["completion_tokens"]
         usage["prompt_tokens"] += message.usage["prompt_tokens"]
     return usage
