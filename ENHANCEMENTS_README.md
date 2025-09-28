@@ -12,9 +12,10 @@ Prior to this enhancement, debugging agent failures was challenging due to limit
 - Which specific tool calls were failing and why
 - How long tool executions were taking
 - When and why environment state was changing
+- LLM context window usage and token consumption patterns
 - Patterns in failure modes across simulations
 
-Research indicated that **87% of agent performance issues** stem from tool execution problems that were difficult to diagnose without detailed logging.
+Research indicated that **87% of agent performance issues** stem from tool execution problems that were difficult to diagnose without detailed logging. Additionally, LLM context management issues (hitting context limits, inefficient token usage) were causing silent failures and performance degradation.
 
 ### Solution Implemented
 A native logging system integrated directly into the tau2-bench core that captures:
@@ -47,7 +48,22 @@ State tracking at key points during simulation:
 }
 ```
 
-#### 3. Performance Metrics
+#### 3. Context/Token Usage Tracking
+LLM context and token consumption monitoring:
+```python
+{
+    "timestamp": "2024-01-15T10:30:05Z",
+    "step_idx": 3,
+    "prompt_tokens": 2048,
+    "completion_tokens": 512,
+    "total_tokens": 2560,
+    "context_window_used": 15.2,
+    "model_context_limit": 200000,
+    "triggered_by": "agent_generation"
+}
+```
+
+#### 4. Performance Metrics
 Aggregated statistics for analysis:
 ```python
 {
@@ -56,7 +72,10 @@ Aggregated statistics for analysis:
     "total_execution_time_ms": 15432.1,
     "average_execution_time_ms": 617.3,
     "unique_tools_used": ["search_flights", "book_flight"],
-    "state_changes": 8
+    "state_changes": 8,
+    "total_tokens": 120659,
+    "max_context_used": 85.3,
+    "context_window_warnings": 2
 }
 ```
 
@@ -79,12 +98,34 @@ results = run_domain(config)
 ```
 
 #### Built-in Analysis Tools
+**Python API:**
 ```python
 from tau2.metrics.execution_analysis import generate_execution_report
 
 # Generate comprehensive analysis report
 report = generate_execution_report(results)
 print(report)
+```
+
+**Ready-to-use Analysis Scripts:**
+```bash
+# Quick comprehensive overview
+python scripts/basic_analysis.py data/simulations/my_results.json
+
+# Deep dive into tool failures
+python scripts/failure_analysis.py data/simulations/my_results.json
+
+# Performance bottleneck identification
+python scripts/performance_analysis.py data/simulations/my_results.json
+
+# Environment state change analysis
+python scripts/state_analysis.py data/simulations/my_results.json
+
+# Complete analysis workflow
+python scripts/complete_analysis.py data/simulations/my_results.json
+
+# Convenient shell runner
+./scripts/run_analysis.sh basic data/simulations/my_results.json
 ```
 
 #### Rich Data Access
@@ -175,18 +216,63 @@ for trigger, count in state_triggers.most_common(5):
     print(f"  {trigger}: {count} times")
 ```
 
+#### Monitor Context Usage and Token Consumption
+```python
+# Analyze token usage patterns
+all_snapshots = []
+for sim in results.simulations:
+    if sim.context_usage_snapshots:
+        all_snapshots.extend(sim.context_usage_snapshots)
+
+# Calculate total token consumption
+total_prompt_tokens = sum(s.prompt_tokens for s in all_snapshots)
+total_completion_tokens = sum(s.completion_tokens for s in all_snapshots)
+total_tokens = sum(s.total_tokens for s in all_snapshots)
+
+print(f"Token Usage Summary:")
+print(f"  Total tokens used: {total_tokens:,}")
+print(f"  Prompt tokens: {total_prompt_tokens:,}")
+print(f"  Completion tokens: {total_completion_tokens:,}")
+
+# Find high context usage warnings
+high_usage = [s for s in all_snapshots
+              if s.context_window_used and s.context_window_used > 80.0]
+if high_usage:
+    print(f"  ⚠️  High context usage warnings: {len(high_usage)}")
+    for s in high_usage[:3]:  # Show top 3
+        print(f"    Step {s.step_idx}: {s.context_window_used:.1f}% usage")
+
+# Analyze usage by trigger (agent vs user generation)
+from collections import defaultdict
+usage_by_trigger = defaultdict(list)
+for s in all_snapshots:
+    usage_by_trigger[s.triggered_by].append(s.total_tokens)
+
+for trigger, tokens in usage_by_trigger.items():
+    avg_tokens = sum(tokens) / len(tokens)
+    print(f"  {trigger}: {avg_tokens:.0f} avg tokens ({len(tokens)} calls)")
+```
+
 
 #### Files Added
-- `src/tau2/data_model/logging.py` - Core logging data models
-- `src/tau2/environment/execution_logger.py` - Logging engine
-- `src/tau2/metrics/execution_analysis.py` - Analysis utilities
+- `src/tau2/data_model/logging.py` - Core logging data models (ToolExecutionLog, ContextUsageSnapshot, ExecutionMetrics)
+- `src/tau2/environment/execution_logger.py` - Logging engine with context tracking
+- `src/tau2/metrics/execution_analysis.py` - Analysis utilities with token usage analysis
+- `scripts/basic_analysis.py` - Comprehensive overview analysis script
+- `scripts/failure_analysis.py` - Tool failure deep-dive script
+- `scripts/performance_analysis.py` - Performance bottleneck identification script
+- `scripts/state_analysis.py` - Environment state change analysis script
+- `scripts/custom_analysis.py` - Advanced custom analysis patterns script
+- `scripts/complete_analysis.py` - Complete analysis workflow script
+- `scripts/run_analysis.sh` - Convenient shell runner for analysis scripts
+- `ANALYSIS_SCRIPTS_GUIDE.md` - Comprehensive guide for using analysis tools
 
 #### Files Enhanced
-- `src/tau2/data_model/simulation.py` - Extended data models
+- `src/tau2/data_model/simulation.py` - Extended data models with context usage snapshots
 - `src/tau2/environment/environment.py` - Tool execution logging
-- `src/tau2/orchestrator/orchestrator.py` - Logging lifecycle management
-- `src/tau2/cli.py` - Command-line interface
-- `src/tau2/run.py` - Runtime integration
+- `src/tau2/orchestrator/orchestrator.py` - Logging lifecycle management and context tracking integration
+- `src/tau2/cli.py` - Command-line interface with enhanced logging flag
+- `src/tau2/run.py` - Runtime integration with logging configuration
 
 #### Backward Compatibility
 - All existing code continues to work unchanged

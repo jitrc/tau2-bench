@@ -28,6 +28,18 @@ class EnvironmentStateSnapshot(BaseModel):
     triggered_by: str = Field(description="What triggered this snapshot (tool_call, step_start, etc)")
 
 
+class ContextUsageSnapshot(BaseModel):
+    """Context/token usage at a point in time"""
+    timestamp: str = Field(default_factory=get_now)
+    step_idx: int = Field(description="Step number in simulation")
+    prompt_tokens: int = Field(description="Number of prompt tokens used")
+    completion_tokens: int = Field(description="Number of completion tokens generated")
+    total_tokens: int = Field(description="Total tokens (prompt + completion)")
+    context_window_used: Optional[float] = Field(description="Percentage of context window used", default=None)
+    model_context_limit: Optional[int] = Field(description="Context limit for the model", default=None)
+    triggered_by: str = Field(description="What triggered this context measurement")
+
+
 class ExecutionMetrics(BaseModel):
     """High-level execution metrics for a simulation"""
     total_tool_calls: int = Field(description="Total number of tool calls made")
@@ -36,3 +48,10 @@ class ExecutionMetrics(BaseModel):
     average_execution_time_ms: float = Field(description="Average tool execution time")
     unique_tools_used: List[str] = Field(description="List of unique tool names used")
     state_changes: int = Field(description="Number of environment state changes")
+
+    # Context/Token usage metrics
+    total_prompt_tokens: int = Field(default=0, description="Total prompt tokens across all LLM calls")
+    total_completion_tokens: int = Field(default=0, description="Total completion tokens across all LLM calls")
+    total_tokens: int = Field(default=0, description="Total tokens used")
+    max_context_used: Optional[float] = Field(default=None, description="Maximum context window utilization percentage")
+    context_window_warnings: int = Field(default=0, description="Number of times context window usage exceeded 80%")

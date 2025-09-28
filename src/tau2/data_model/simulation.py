@@ -21,7 +21,7 @@ from tau2.config import (
     DEFAULT_SEED,
 )
 from tau2.data_model.message import Message
-from tau2.data_model.logging import ToolExecutionLog, EnvironmentStateSnapshot, ExecutionMetrics
+from tau2.data_model.logging import ToolExecutionLog, EnvironmentStateSnapshot, ExecutionMetrics, ContextUsageSnapshot
 from tau2.data_model.tasks import Action, EnvAssertion, RewardType, Task
 from tau2.environment.environment import EnvironmentInfo
 from tau2.utils.utils import get_now
@@ -354,6 +354,9 @@ class SimulationRun(BaseModel):
     )
     state_snapshots: Optional[list[EnvironmentStateSnapshot]] = Field(
         default=None, description="Environment state snapshots"
+    )
+    context_usage_snapshots: Optional[list[ContextUsageSnapshot]] = Field(
+        default=None, description="Context/token usage snapshots"
     )
     execution_metrics: Optional[ExecutionMetrics] = Field(
         default=None, description="High-level execution metrics"

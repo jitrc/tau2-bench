@@ -299,6 +299,7 @@ class Orchestrator:
         if self.environment.execution_logger.enabled:
             simulation_run.execution_logs = self.environment.execution_logger.execution_logs
             simulation_run.state_snapshots = self.environment.execution_logger.state_snapshots
+            simulation_run.context_usage_snapshots = self.environment.execution_logger.context_snapshots
             simulation_run.execution_metrics = self.environment.execution_logger.get_execution_metrics()
             simulation_run.enhanced_logging_enabled = True
 
@@ -321,6 +322,17 @@ class Orchestrator:
         )
         # AGENT/ENV -> USER
         if self.from_role in [Role.AGENT, Role.ENV] and self.to_role == Role.USER:
+            # Log context usage before user generation if enhanced logging is enabled
+            if self.environment.execution_logger.enabled:
+                user_history = [msg for msg in self.trajectory if is_valid_user_history_message(msg)]
+                user_history.append(self.message)
+                # Check if user is an LLM-based user
+                user_model_name = getattr(self.user, 'llm', None)
+                if user_model_name:  # Only log if user is LLM-based
+                    self.environment.execution_logger.log_context_usage(
+                        user_history, "user_generation", user_model_name
+                    )
+
             user_msg, self.user_state = self.user.generate_next_message(
                 self.message, self.user_state
             )
@@ -339,6 +351,15 @@ class Orchestrator:
         elif (
             self.from_role == Role.USER or self.from_role == Role.ENV
         ) and self.to_role == Role.AGENT:
+            # Log context usage before agent generation if enhanced logging is enabled
+            if self.environment.execution_logger.enabled:
+                agent_history = [msg for msg in self.trajectory if is_valid_agent_history_message(msg)]
+                agent_history.append(self.message)
+                model_name = getattr(self.agent, 'llm', None)
+                self.environment.execution_logger.log_context_usage(
+                    agent_history, "agent_generation", model_name
+                )
+
             agent_msg, self.agent_state = self.agent.generate_next_message(
                 self.message, self.agent_state
             )
