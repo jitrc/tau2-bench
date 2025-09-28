@@ -24,6 +24,8 @@ class EnvironmentStateSnapshot(BaseModel):
     step_idx: int = Field(description="Step number in simulation")
     db_hash: Optional[str] = Field(description="Hash of environment database", default=None)
     user_db_hash: Optional[str] = Field(description="Hash of user database", default=None)
+    db_diff: Optional[Dict[str, Any]] = Field(description="Database changes from previous snapshot", default=None)
+    user_db_diff: Optional[Dict[str, Any]] = Field(description="User database changes from previous snapshot", default=None)
     state_changed: bool = Field(description="Whether state changed from previous snapshot")
     triggered_by: str = Field(description="What triggered this snapshot (tool_call, step_start, etc)")
 

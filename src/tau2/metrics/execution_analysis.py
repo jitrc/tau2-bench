@@ -118,7 +118,9 @@ def analyze_state_changes(results: Results) -> Dict[str, Any]:
         "total_state_changes": 0,
         "changes_per_simulation": [],
         "change_triggers": Counter(),
-        "simulations_with_changes": 0
+        "simulations_with_changes": 0,
+        "db_changes_summary": {},
+        "most_common_db_changes": []
     }
 
     enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
@@ -134,10 +136,21 @@ def analyze_state_changes(results: Results) -> Dict[str, Any]:
             if changes_in_sim > 0:
                 analysis["simulations_with_changes"] += 1
 
-            # Track what triggered state changes
+            # Track what triggered state changes and analyze db diffs
             for snapshot in sim.state_snapshots:
                 if snapshot.state_changed:
                     analysis["change_triggers"][snapshot.triggered_by] += 1
+
+                    # Analyze database diffs if available
+                    if hasattr(snapshot, 'db_diff') and snapshot.db_diff:
+                        db_diff = snapshot.db_diff
+                        for change_type in ['added', 'modified', 'removed']:
+                            if db_diff.get(change_type):
+                                for key in db_diff[change_type].keys():
+                                    change_key = f"{change_type}:{key}"
+                                    if change_key not in analysis["db_changes_summary"]:
+                                        analysis["db_changes_summary"][change_key] = 0
+                                    analysis["db_changes_summary"][change_key] += 1
 
     # Calculate statistics
     if analysis["changes_per_simulation"]:
@@ -148,6 +161,13 @@ def analyze_state_changes(results: Results) -> Dict[str, Any]:
         analysis["max_changes_per_sim"] = 0
 
     analysis["change_triggers"] = dict(analysis["change_triggers"])
+
+    # Find most common database changes
+    if analysis["db_changes_summary"]:
+        analysis["most_common_db_changes"] = sorted(
+            analysis["db_changes_summary"].items(),
+            key=lambda x: x[1], reverse=True
+        )[:5]  # Top 5 most common changes
 
     return analysis
 
@@ -244,6 +264,49 @@ def analyze_context_usage(results: Results) -> Dict[str, Any]:
     return analysis
 
 
+def analyze_database_diffs(results: Results) -> Dict[str, Any]:
+    """Analyze detailed database diff patterns across simulations."""
+    analysis = {
+        "snapshots_with_diffs": 0,
+        "total_db_changes": 0,
+        "detailed_changes": [],
+        "change_patterns": {},
+        "fields_changed_most": Counter(),
+        "change_types_distribution": Counter()
+    }
+
+    enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
+    if not enhanced_sims:
+        return analysis
+
+    for sim in enhanced_sims:
+        if sim.state_snapshots:
+            for snapshot in sim.state_snapshots:
+                if hasattr(snapshot, 'db_diff') and snapshot.db_diff:
+                    analysis["snapshots_with_diffs"] += 1
+                    db_diff = snapshot.db_diff
+
+                    change_summary = {
+                        "simulation_id": sim.id,
+                        "step_idx": snapshot.step_idx,
+                        "triggered_by": snapshot.triggered_by,
+                        "timestamp": snapshot.timestamp,
+                        "changes": db_diff
+                    }
+                    analysis["detailed_changes"].append(change_summary)
+
+                    # Analyze change patterns
+                    for change_type in ['added', 'modified', 'removed']:
+                        if db_diff.get(change_type):
+                            analysis["change_types_distribution"][change_type] += len(db_diff[change_type])
+                            analysis["total_db_changes"] += len(db_diff[change_type])
+
+                            for field_name in db_diff[change_type].keys():
+                                analysis["fields_changed_most"][field_name] += 1
+
+    return analysis
+
+
 def generate_execution_report(results: Results) -> str:
     """Generate a comprehensive execution analysis report."""
     if not any(sim.enhanced_logging_enabled for sim in results.simulations):
@@ -311,6 +374,15 @@ def generate_execution_report(results: Results) -> str:
                                key=lambda x: x[1], reverse=True)[:3]
         for trigger, count in sorted_triggers:
             report_lines.append(f"     - {trigger}: {count} times")
+
+    # Database changes analysis
+    if state_analysis["most_common_db_changes"]:
+        report_lines.extend([
+            f"   • Most common database changes:"
+        ])
+        for change_desc, count in state_analysis["most_common_db_changes"][:3]:
+            change_type, field = change_desc.split(':', 1)
+            report_lines.append(f"     - {field} ({change_type}): {count} times")
 
     report_lines.append("")
 

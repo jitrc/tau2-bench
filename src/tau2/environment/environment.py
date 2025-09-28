@@ -2,7 +2,7 @@ import json
 import time
 from copy import deepcopy
 from datetime import date, datetime
-from typing import Any, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -298,6 +298,15 @@ class Environment:
             return None
         return self.tools.get_db_hash()
 
+    def get_db_state(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the current state of the agent database
+        Returns None if the database is not available
+        """
+        if self.tools is None or self.tools.db is None:
+            return None
+        return self.tools.db.model_dump()
+
     def get_user_db_hash(self) -> Optional[str]:
         """
         Get a hash of the user database
@@ -306,6 +315,15 @@ class Environment:
         if self.user_tools is None:
             return None
         return self.user_tools.get_db_hash()
+
+    def get_user_db_state(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the current state of the user database
+        Returns None if the database is not available
+        """
+        if self.user_tools is None or self.user_tools.db is None:
+            return None
+        return self.user_tools.db.model_dump()
 
     def set_state(
         self,

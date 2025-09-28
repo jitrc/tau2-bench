@@ -12,10 +12,13 @@ Prior to this enhancement, debugging agent failures was challenging due to limit
 - Which specific tool calls were failing and why
 - How long tool executions were taking
 - When and why environment state was changing
+- **What exactly changed** in the environment database (not just that it changed)
 - LLM context window usage and token consumption patterns
 - Patterns in failure modes across simulations
 
 Research indicated that **87% of agent performance issues** stem from tool execution problems that were difficult to diagnose without detailed logging. Additionally, LLM context management issues (hitting context limits, inefficient token usage) were causing silent failures and performance degradation.
+
+**Key insight:** Knowing that a database "changed" (via hash comparison) was insufficient for debugging - developers needed to see **exactly what changed, when, and why**.
 
 ### Solution Implemented
 A native logging system integrated directly into the tau2-bench core that captures:
@@ -48,7 +51,31 @@ State tracking at key points during simulation:
 }
 ```
 
-#### 3. Context/Token Usage Tracking
+#### 3. Database Diff Tracking
+Detailed database change capture with before/after values:
+```python
+{
+    "timestamp": "2024-01-15T10:30:03Z",
+    "step_idx": 2,
+    "db_hash": "abc456...",
+    "db_diff": {
+        "added": {
+            "reservation_id": "RES123"
+        },
+        "modified": {
+            "flight_status": {
+                "from": "AVAILABLE",
+                "to": "BOOKED"
+            }
+        },
+        "removed": {}
+    },
+    "state_changed": true,
+    "triggered_by": "post_book_flight"
+}
+```
+
+#### 4. Context/Token Usage Tracking
 LLM context and token consumption monitoring:
 ```python
 {
@@ -63,7 +90,7 @@ LLM context and token consumption monitoring:
 }
 ```
 
-#### 4. Performance Metrics
+#### 5. Performance Metrics
 Aggregated statistics for analysis:
 ```python
 {
@@ -253,11 +280,74 @@ for trigger, tokens in usage_by_trigger.items():
     print(f"  {trigger}: {avg_tokens:.0f} avg tokens ({len(tokens)} calls)")
 ```
 
+#### Track Database Changes and Diffs
+```python
+# Analyze what actually changed in the database
+changes_with_diffs = []
+for sim in results.simulations:
+    if sim.state_snapshots:
+        for snapshot in sim.state_snapshots:
+            if snapshot.db_diff and snapshot.state_changed:
+                changes_with_diffs.append({
+                    'simulation': sim.id,
+                    'step': snapshot.step_idx,
+                    'trigger': snapshot.triggered_by,
+                    'changes': snapshot.db_diff
+                })
+
+print(f"Found {len(changes_with_diffs)} database changes with detailed diffs")
+
+# Analyze most common field changes
+from collections import Counter
+field_changes = Counter()
+
+for change in changes_with_diffs:
+    db_diff = change['changes']
+
+    # Count added fields
+    for field in db_diff.get('added', {}):
+        field_changes[f"added:{field}"] += 1
+
+    # Count modified fields
+    for field in db_diff.get('modified', {}):
+        field_changes[f"modified:{field}"] += 1
+
+    # Count removed fields
+    for field in db_diff.get('removed', {}):
+        field_changes[f"removed:{field}"] += 1
+
+print("Most frequently changed database fields:")
+for field_change, count in field_changes.most_common(5):
+    change_type, field_name = field_change.split(':', 1)
+    print(f"  {field_name} ({change_type}): {count} times")
+
+# Show specific examples of database changes
+print("\nExample database changes:")
+for i, change in enumerate(changes_with_diffs[:3]):  # Show first 3
+    print(f"\nChange {i+1} - Step {change['step']} ({change['trigger']}):")
+    db_diff = change['changes']
+
+    if db_diff.get('added'):
+        print("  Added fields:")
+        for field, value in db_diff['added'].items():
+            print(f"    {field}: {value}")
+
+    if db_diff.get('modified'):
+        print("  Modified fields:")
+        for field, change_detail in db_diff['modified'].items():
+            print(f"    {field}: {change_detail['from']} → {change_detail['to']}")
+
+    if db_diff.get('removed'):
+        print("  Removed fields:")
+        for field, old_value in db_diff['removed'].items():
+            print(f"    {field}: {old_value} (removed)")
+```
+
 
 #### Files Added
-- `src/tau2/data_model/logging.py` - Core logging data models (ToolExecutionLog, ContextUsageSnapshot, ExecutionMetrics)
-- `src/tau2/environment/execution_logger.py` - Logging engine with context tracking
-- `src/tau2/metrics/execution_analysis.py` - Analysis utilities with token usage analysis
+- `src/tau2/data_model/logging.py` - Core logging data models (ToolExecutionLog, EnvironmentStateSnapshot with db_diff, ContextUsageSnapshot, ExecutionMetrics)
+- `src/tau2/environment/execution_logger.py` - Logging engine with context tracking and database diff calculation
+- `src/tau2/metrics/execution_analysis.py` - Analysis utilities with token usage and database diff analysis
 - `scripts/basic_analysis.py` - Comprehensive overview analysis script
 - `scripts/failure_analysis.py` - Tool failure deep-dive script
 - `scripts/performance_analysis.py` - Performance bottleneck identification script
@@ -268,8 +358,8 @@ for trigger, tokens in usage_by_trigger.items():
 - `ANALYSIS_SCRIPTS_GUIDE.md` - Comprehensive guide for using analysis tools
 
 #### Files Enhanced
-- `src/tau2/data_model/simulation.py` - Extended data models with context usage snapshots
-- `src/tau2/environment/environment.py` - Tool execution logging
+- `src/tau2/data_model/simulation.py` - Extended data models with context usage snapshots and database diff support
+- `src/tau2/environment/environment.py` - Tool execution logging and database state access methods (get_db_state, get_user_db_state)
 - `src/tau2/orchestrator/orchestrator.py` - Logging lifecycle management and context tracking integration
 - `src/tau2/cli.py` - Command-line interface with enhanced logging flag
 - `src/tau2/run.py` - Runtime integration with logging configuration
@@ -279,4 +369,39 @@ for trigger, tokens in usage_by_trigger.items():
 - Logging is disabled by default (zero overhead)
 - New fields in data models are optional
 - Analysis tools gracefully handle missing logging data
+
+## Key Enhancement: Database Diff Tracking
+
+The most significant addition to the enhanced logging system is **database diff tracking**, which provides:
+
+### Before vs After Visibility
+Instead of just knowing "database changed" (via hash), you now see:
+- **Added fields**: New data created by tool calls
+- **Modified fields**: Before and after values for changed data
+- **Removed fields**: Data that was deleted
+
+### Actionable Debugging Information
+```python
+# Example: See exactly what changed
+db_diff = {
+    "added": {"reservation_id": "RES123"},
+    "modified": {
+        "seat_count": {"from": 10, "to": 9},
+        "status": {"from": "AVAILABLE", "to": "BOOKED"}
+    },
+    "removed": {}
+}
+```
+
+### Change Attribution
+- Link specific database changes to the tool calls that caused them
+- Track which simulation steps modified which database fields
+- Understand the sequence of environment state modifications
+
+### Pattern Analysis
+- Identify the most frequently modified database fields
+- Find tools that cause unexpected database changes
+- Detect inconsistent or redundant database modifications
+
+This enhancement transforms debugging from "something changed somewhere" to "here's exactly what changed, when, and what tool call caused it" - making agent behavior analysis significantly more precise and actionable.
 
