@@ -20,44 +20,46 @@ from tau2.data_model.simulation import Results
 from tau2.metrics.execution_analysis import analyze_tool_failures
 
 
-def print_failure_summary(failure_analysis):
+import io
+
+def print_failure_summary(failure_analysis, file=None):
     """Print a summary of tool failure analysis."""
 
-    print(f"📊 Failure Analysis Summary:")
-    print(f"   • Total simulations: {failure_analysis['total_simulations']}")
-    print(f"   • Enhanced logging available: {failure_analysis['enhanced_logging_simulations']}")
-    print()
+    print(f"📊 Failure Analysis Summary:", file=file)
+    print(f"   • Total simulations: {failure_analysis['total_simulations']}", file=file)
+    print(f"   • Enhanced logging available: {failure_analysis['enhanced_logging_simulations']}", file=file)
+    print(file=file)
 
     # Show most failing tools
     if failure_analysis['most_failing_tools']:
-        print("❌ Most Problematic Tools:")
+        print("❌ Most Problematic Tools:", file=file)
         for i, (tool_name, failure_rate) in enumerate(failure_analysis['most_failing_tools'][:10], 1):
-            print(f"   {i:2d}. {tool_name}: {failure_rate:.1%} failure rate")
-        print()
+            print(f"   {i:2d}. {tool_name}: {failure_rate:.1%} failure rate", file=file)
+        print(file=file)
 
     # Show common error patterns
     if failure_analysis['failure_patterns']:
-        print("🔍 Common Error Patterns:")
+        print("🔍 Common Error Patterns:", file=file)
         for i, (error_pattern, count) in enumerate(failure_analysis['failure_patterns'].items(), 1):
-            print(f"   {i:2d}. {error_pattern}: {count} occurrences")
-        print()
+            print(f"   {i:2d}. {error_pattern}: {count} occurrences", file=file)
+        print(file=file)
 
 
-def print_detailed_tool_stats(failure_analysis):
+def print_detailed_tool_stats(failure_analysis, file=None):
     """Print detailed statistics for each tool."""
 
-    print("🔧 Detailed Tool Statistics:")
-    print("-" * 80)
+    print("🔧 Detailed Tool Statistics:", file=file)
+    print("-" * 80, file=file)
 
     for tool_name, stats in failure_analysis['tool_failure_stats'].items():
         if stats['total'] > 0:  # Only show tools that were actually called
             success_rate = (stats['total'] - stats['failed']) / stats['total']
 
-            print(f"\n{tool_name}:")
-            print(f"   Total calls: {stats['total']:4d}")
-            print(f"   Successful:  {stats['total'] - stats['failed']:4d} ({success_rate:6.1%})")
-            print(f"   Failed:      {stats['failed']:4d} ({stats['failure_rate']:6.1%})")
-            print(f"   Avg time:    {stats['avg_execution_time']:8.1f}ms")
+            print(f"\n{tool_name}:", file=file)
+            print(f"   Total calls: {stats['total']:4d}", file=file)
+            print(f"   Successful:  {stats['total'] - stats['failed']:4d} ({success_rate:6.1%})", file=file)
+            print(f"   Failed:      {stats['failed']:4d} ({stats['failure_rate']:6.1%})", file=file)
+            print(f"   Avg time:    {stats['avg_execution_time']:8.1f}ms", file=file)
 
             # Color-code based on performance
             if stats['failure_rate'] > 0.2:  # >20% failure rate
@@ -69,14 +71,14 @@ def print_detailed_tool_stats(failure_analysis):
             else:
                 status = "✅ PERFORMING WELL"
 
-            print(f"   Status:      {status}")
+            print(f"   Status:      {status}", file=file)
 
 
-def analyze_failure_patterns(results):
+def analyze_failure_patterns(results, file=None):
     """Analyze specific failure patterns and provide insights."""
 
-    print("\n🕵️ Failure Pattern Analysis:")
-    print("-" * 40)
+    print("\n🕵️ Failure Pattern Analysis:", file=file)
+    print("-" * 40, file=file)
 
     # Collect all failed tool calls
     failed_calls = []
@@ -94,10 +96,10 @@ def analyze_failure_patterns(results):
                     })
 
     if not failed_calls:
-        print("✅ No tool failures found!")
+        print("✅ No tool failures found!", file=file)
         return
 
-    print(f"Total failed tool calls: {len(failed_calls)}")
+    print(f"Total failed tool calls: {len(failed_calls)}", file=file)
 
     # Analyze error types
     error_types = Counter()
@@ -110,36 +112,36 @@ def analyze_failure_patterns(results):
                 error_type = call['error_details'][:20].strip()
             error_types[error_type] += 1
 
-    print(f"\nError Type Distribution:")
+    print(f"\nError Type Distribution:", file=file)
     for error_type, count in error_types.most_common(10):
         percentage = count / len(failed_calls) * 100
-        print(f"   {error_type}: {count} ({percentage:.1f}%)")
+        print(f"   {error_type}: {count} ({percentage:.1f}%)", file=file)
 
     # Analyze failure by requestor
     requestor_failures = Counter(call['requestor'] for call in failed_calls)
-    print(f"\nFailures by Requestor:")
+    print(f"\nFailures by Requestor:", file=file)
     for requestor, count in requestor_failures.most_common():
         percentage = count / len(failed_calls) * 100
-        print(f"   {requestor}: {count} ({percentage:.1f}%)")
+        print(f"   {requestor}: {count} ({percentage:.1f}%)", file=file)
 
     # Show some example failures
-    print(f"\n📋 Example Failures (first 5):")
+    print(f"\n📋 Example Failures (first 5):", file=file)
     for i, call in enumerate(failed_calls[:5], 1):
-        print(f"\n   {i}. Task {call['task_id']} - {call['tool_name']} ({call['requestor']})")
-        print(f"      Error: {call['error_details']}")
+        print(f"\n   {i}. Task {call['task_id']} - {call['tool_name']} ({call['requestor']})", file=file)
+        print(f"      Error: {call['error_details']}", file=file)
         if call['arguments']:
             # Show first few arguments
             args_str = str(call['arguments'])
             if len(args_str) > 100:
                 args_str = args_str[:97] + "..."
-            print(f"      Args: {args_str}")
+            print(f"      Args: {args_str}", file=file)
 
 
-def generate_recommendations(failure_analysis):
+def generate_recommendations(failure_analysis, file=None):
     """Generate actionable recommendations based on failure analysis."""
 
-    print("\n💡 Recommendations:")
-    print("-" * 20)
+    print("\n💡 Recommendations:", file=file)
+    print("-" * 20, file=file)
 
     recommendations = []
 
@@ -180,7 +182,7 @@ def generate_recommendations(failure_analysis):
         recommendations.append("✅ No critical issues found! Tools are performing well.")
 
     for rec in recommendations:
-        print(rec)
+        print(rec, file=file)
 
 
 def main():
@@ -215,31 +217,26 @@ def main():
         # Run failure analysis
         failure_analysis = analyze_tool_failures(results)
 
-        # Print analysis results
-        print_failure_summary(failure_analysis)
-        print_detailed_tool_stats(failure_analysis)
-        analyze_failure_patterns(results)
-        generate_recommendations(failure_analysis)
+        # In-memory buffer to capture detailed report
+        report_buffer = io.StringIO()
+
+        # Generate report content
+        print_failure_summary(failure_analysis, file=report_buffer)
+        print_detailed_tool_stats(failure_analysis, file=report_buffer)
+        analyze_failure_patterns(results, file=report_buffer)
+        generate_recommendations(failure_analysis, file=report_buffer)
+
+        # Get report content and print to console
+        report_content = report_buffer.getvalue()
+        print(report_content)
 
         # Save detailed results to file
         output_file = results_file.parent / f"{results_file.stem}_failure_analysis.txt"
         with open(output_file, 'w') as f:
             f.write("TOOL FAILURE ANALYSIS REPORT\n")
             f.write("=" * 40 + "\n\n")
-
-            f.write(f"Results file: {results_file}\n")
-            f.write(f"Total simulations: {failure_analysis['total_simulations']}\n")
-            f.write(f"Enhanced logging simulations: {failure_analysis['enhanced_logging_simulations']}\n\n")
-
-            f.write("TOOL STATISTICS:\n")
-            for tool_name, stats in failure_analysis['tool_failure_stats'].items():
-                if stats['total'] > 0:
-                    f.write(f"{tool_name}: {stats['total']} calls, {stats['failed']} failures "
-                           f"({stats['failure_rate']:.1%}), {stats['avg_execution_time']:.1f}ms avg\n")
-
-            f.write("\nERROR PATTERNS:\n")
-            for error, count in failure_analysis['failure_patterns'].items():
-                f.write(f"{error}: {count} occurrences\n")
+            f.write(f"Results file: {results_file}\n\n")
+            f.write(report_content)
 
         print(f"\n💾 Detailed failure analysis saved to: {output_file}")
 

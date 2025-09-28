@@ -53,31 +53,33 @@ def run_comprehensive_analysis(results):
     return analyses
 
 
-def print_comprehensive_results(analyses, results):
+import io
+
+def print_comprehensive_results(analyses, results, file=None):
     """Print comprehensive analysis results."""
 
-    print("\n" + "="*80)
-    print("🔍 COMPREHENSIVE ANALYSIS RESULTS")
-    print("="*80)
+    print("\n" + "="*80, file=file)
+    print("🔍 COMPREHENSIVE ANALYSIS RESULTS", file=file)
+    print("="*80, file=file)
 
     # Overview
     enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-    print(f"\n📊 ANALYSIS OVERVIEW:")
-    print(f"   • Total simulations: {len(results.simulations)}")
-    print(f"   • Enhanced logging enabled: {len(enhanced_sims)}")
-    print(f"   • Analysis timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\n📊 ANALYSIS OVERVIEW:", file=file)
+    print(f"   • Total simulations: {len(results.simulations)}", file=file)
+    print(f"   • Enhanced logging enabled: {len(enhanced_sims)}", file=file)
+    print(f"   • Analysis timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", file=file)
 
     # 1. Executive Summary from main report
-    print(f"\n📋 EXECUTIVE SUMMARY:")
-    print("-" * 30)
-    print(analyses['execution_report'])
+    print(f"\n📋 EXECUTIVE SUMMARY:", file=file)
+    print("-" * 30, file=file)
+    print(analyses['execution_report'], file=file)
 
     # 2. Detailed Failure Analysis
     failure_analysis = analyses['failure_analysis']
     if failure_analysis['tool_failure_stats']:
-        print(f"\n❌ DETAILED FAILURE BREAKDOWN:")
-        print("-" * 40)
-        print(f"Tools analyzed: {len(failure_analysis['tool_failure_stats'])}")
+        print(f"\n❌ DETAILED FAILURE BREAKDOWN:", file=file)
+        print("-" * 40, file=file)
+        print(f"Tools analyzed: {len(failure_analysis['tool_failure_stats'])}", file=file)
 
         # Show problematic tools
         problematic_tools = [
@@ -87,45 +89,45 @@ def print_comprehensive_results(analyses, results):
 
         if problematic_tools:
             problematic_tools.sort(key=lambda x: x[1]['failure_rate'], reverse=True)
-            print(f"High-failure tools ({len(problematic_tools)} found):")
+            print(f"High-failure tools ({len(problematic_tools)} found):", file=file)
             for tool, stats in problematic_tools:
                 print(f"   🔴 {tool}: {stats['failure_rate']:.1%} failure rate "
-                      f"({stats['failed']}/{stats['total']} calls, {stats['avg_execution_time']:.1f}ms avg)")
+                      f"({stats['failed']}/{stats['total']} calls, {stats['avg_execution_time']:.1f}ms avg)", file=file)
         else:
-            print("✅ No high-failure tools identified")
+            print("✅ No high-failure tools identified", file=file)
 
     # 3. Performance Insights
     perf_analysis = analyses['performance_analysis']
     if perf_analysis['slowest_tools']:
-        print(f"\n⚡ PERFORMANCE INSIGHTS:")
-        print("-" * 35)
-        print("Slowest tools requiring optimization:")
+        print(f"\n⚡ PERFORMANCE INSIGHTS:", file=file)
+        print("-" * 35, file=file)
+        print("Slowest tools requiring optimization:", file=file)
         for tool, avg_time in perf_analysis['slowest_tools'][:5]:
             if avg_time > 1000:  # >1 second
-                print(f"   🐌 {tool}: {avg_time:.1f}ms (optimization target)")
+                print(f"   🐌 {tool}: {avg_time:.1f}ms (optimization target)", file=file)
 
         # Show statistics summary
         if perf_analysis['execution_time_stats']:
             all_means = [stats['mean'] for stats in perf_analysis['execution_time_stats'].values()]
             import statistics
             overall_avg = statistics.mean(all_means) if all_means else 0
-            print(f"Overall average tool execution time: {overall_avg:.1f}ms")
+            print(f"Overall average tool execution time: {overall_avg:.1f}ms", file=file)
 
     # 4. State Management Summary
     state_analysis = analyses['state_analysis']
-    print(f"\n🔄 STATE MANAGEMENT SUMMARY:")
-    print("-" * 35)
-    print(f"Total state changes: {state_analysis['total_state_changes']}")
-    print(f"Simulations affected: {state_analysis['simulations_with_changes']}")
-    print(f"Average changes per simulation: {state_analysis['avg_changes_per_sim']:.1f}")
+    print(f"\n🔄 STATE MANAGEMENT SUMMARY:", file=file)
+    print("-" * 35, file=file)
+    print(f"Total state changes: {state_analysis['total_state_changes']}", file=file)
+    print(f"Simulations affected: {state_analysis['simulations_with_changes']}", file=file)
+    print(f"Average changes per simulation: {state_analysis['avg_changes_per_sim']:.1f}", file=file)
 
     if state_analysis['change_triggers']:
         dominant_trigger = max(state_analysis['change_triggers'], key=state_analysis['change_triggers'].get)
-        print(f"Most frequent trigger: {dominant_trigger} ({state_analysis['change_triggers'][dominant_trigger]} times)")
+        print(f"Most frequent trigger: {dominant_trigger} ({state_analysis['change_triggers'][dominant_trigger]} times)", file=file)
 
     # 5. Action Items
-    print(f"\n🎯 RECOMMENDED ACTION ITEMS:")
-    print("-" * 35)
+    print(f"\n🎯 RECOMMENDED ACTION ITEMS:", file=file)
+    print("-" * 35, file=file)
 
     action_items = []
 
@@ -154,82 +156,21 @@ def print_comprehensive_results(analyses, results):
 
     if action_items:
         for i, item in enumerate(action_items, 1):
-            print(f"   {i}. {item}")
+            print(f"   {i}. {item}", file=file)
     else:
-        print("   ✅ No critical issues identified - system performing well!")
+        print("   ✅ No critical issues identified - system performing well!", file=file)
 
 
-def generate_summary_metrics(analyses, results):
-    """Generate summary metrics for dashboard/monitoring."""
-
-    enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-
-    # Calculate overall metrics
-    total_tool_calls = 0
-    total_failed_calls = 0
-    total_execution_time = 0
-    simulation_rewards = []
-
-    for sim in enhanced_sims:
-        if sim.execution_metrics:
-            total_tool_calls += sim.execution_metrics.total_tool_calls
-            total_failed_calls += sim.execution_metrics.failed_tool_calls
-            total_execution_time += sim.execution_metrics.total_execution_time_ms
-
-        if sim.reward_info:
-            simulation_rewards.append(sim.reward_info.reward)
-
-    # Summary metrics
-    metrics = {
-        'total_simulations': len(results.simulations),
-        'enhanced_simulations': len(enhanced_sims),
-        'overall_success_rate': (total_tool_calls - total_failed_calls) / total_tool_calls if total_tool_calls > 0 else 0,
-        'average_reward': sum(simulation_rewards) / len(simulation_rewards) if simulation_rewards else 0,
-        'total_tool_calls': total_tool_calls,
-        'total_execution_time_ms': total_execution_time,
-        'average_execution_time_ms': total_execution_time / total_tool_calls if total_tool_calls > 0 else 0,
-        'unique_tools_analyzed': len(analyses['performance_analysis'].get('execution_time_stats', {})),
-        'state_changes_per_sim': analyses['state_analysis']['avg_changes_per_sim'],
-        'analysis_timestamp': datetime.now().isoformat()
-    }
-
-    return metrics
-
-
-def save_comprehensive_results(analyses, results, results_file):
+def save_comprehensive_results(analyses, results, results_file, report_content):
     """Save all analysis results to files."""
 
     base_path = results_file.parent
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 1. Save comprehensive text report
-    report_file = base_path / f"{results_file.stem}_comprehensive_analysis_{timestamp}.txt"
+    report_file = base_path / f"{results_file.stem}_comprehensive_analysis.txt"
     with open(report_file, 'w') as f:
-        f.write("COMPREHENSIVE ANALYSIS REPORT\n")
-        f.write("="*50 + "\n\n")
-
-        f.write(f"Results file: {results_file}\n")
-        f.write(f"Analysis date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-
-        # Executive summary
-        f.write("EXECUTIVE SUMMARY:\n")
-        f.write("-" * 20 + "\n")
-        f.write(analyses['execution_report'])
-        f.write("\n\n")
-
-        # Detailed sections
-        f.write("TOOL FAILURE DETAILS:\n")
-        f.write("-" * 25 + "\n")
-        for tool, stats in analyses['failure_analysis'].get('tool_failure_stats', {}).items():
-            if stats['total'] > 0:
-                f.write(f"{tool}: {stats['total']} calls, {stats['failed']} failures "
-                       f"({stats['failure_rate']:.1%}), {stats['avg_execution_time']:.1f}ms\n")
-
-        f.write("\nPERFORMANCE STATISTICS:\n")
-        f.write("-" * 25 + "\n")
-        for tool, stats in analyses['performance_analysis'].get('execution_time_stats', {}).items():
-            f.write(f"{tool}: {stats['mean']:.1f}ms ± {stats['std_dev']:.1f}ms "
-                   f"(range: {stats['min']:.1f}-{stats['max']:.1f}ms, n={stats['count']})\n")
+        f.write(report_content)
 
     # 2. Save structured JSON data
     json_file = base_path / f"{results_file.stem}_analysis_data_{timestamp}.json"
@@ -252,6 +193,33 @@ def save_comprehensive_results(analyses, results, results_file):
         json.dump(analysis_data, f, indent=2, default=str)
 
     return report_file, json_file
+
+
+def generate_summary_metrics(analyses, results):
+    """Generate a dictionary of summary metrics."""
+    metrics = {}
+
+    # Overall success rate
+    success_count = sum(1 for sim in results.simulations if sim.status == 'SUCCESS')
+    metrics['overall_success_rate'] = success_count / len(results.simulations) if results.simulations else 0
+
+    # Average reward
+    total_reward = sum(sim.reward for sim in results.simulations if sim.reward is not None)
+    metrics['average_reward'] = total_reward / len(results.simulations) if results.simulations else 0
+
+    # Average execution time
+    perf_analysis = analyses.get('performance_analysis', {})
+    if perf_analysis.get('execution_time_stats'):
+        all_means = [stats['mean'] for stats in perf_analysis['execution_time_stats'].values()]
+        metrics['average_execution_time_ms'] = statistics.mean(all_means) if all_means else 0
+    else:
+        metrics['average_execution_time_ms'] = 0
+
+    # Unique tools analyzed
+    failure_analysis = analyses.get('failure_analysis', {})
+    metrics['unique_tools_analyzed'] = len(failure_analysis.get('tool_failure_stats', {}))
+
+    return metrics
 
 
 def main():
@@ -290,12 +258,15 @@ def main():
         # Run comprehensive analysis
         analyses = run_comprehensive_analysis(results)
 
-        # Display results
-        print_comprehensive_results(analyses, results)
+        # In-memory buffer to capture detailed report
+        report_buffer = io.StringIO()
+        print_comprehensive_results(analyses, results, file=report_buffer)
+        report_content = report_buffer.getvalue()
+        print(report_content)
 
         # Save results
         print(f"\n💾 Saving analysis results...")
-        report_file, json_file = save_comprehensive_results(analyses, results, results_file)
+        report_file, json_file = save_comprehensive_results(analyses, results, results_file, report_content)
 
         print(f"\n🎉 COMPREHENSIVE ANALYSIS COMPLETE!")
         print(f"   📄 Text report: {report_file}")
@@ -308,13 +279,8 @@ def main():
         print(f"   • Average reward: {metrics['average_reward']:.3f}")
         print(f"   • Avg execution time: {metrics['average_execution_time_ms']:.1f}ms")
         print(f"   • Tools analyzed: {metrics['unique_tools_analyzed']}")
-
     except Exception as e:
-        print(f"❌ Error running comprehensive analysis: {e}")
+        print(f"\n❌ An error occurred during analysis: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

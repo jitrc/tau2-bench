@@ -20,54 +20,56 @@ from tau2.data_model.simulation import Results
 from tau2.metrics.execution_analysis import analyze_state_changes
 
 
-def print_state_summary(state_analysis):
+import io
+
+def print_state_summary(state_analysis, file=None):
     """Print a summary of state change analysis."""
 
-    print("🔄 Environment State Analysis Summary:")
-    print("-" * 40)
+    print("🔄 Environment State Analysis Summary:", file=file)
+    print("-" * 40, file=file)
 
-    print(f"Total state changes: {state_analysis['total_state_changes']}")
-    print(f"Simulations affected: {state_analysis['simulations_with_changes']}")
-    print(f"Average changes per simulation: {state_analysis['avg_changes_per_sim']:.1f}")
-    print(f"Maximum changes in single simulation: {state_analysis['max_changes_per_sim']}")
+    print(f"Total state changes: {state_analysis['total_state_changes']}", file=file)
+    print(f"Simulations affected: {state_analysis['simulations_with_changes']}", file=file)
+    print(f"Average changes per simulation: {state_analysis['avg_changes_per_sim']:.1f}", file=file)
+    print(f"Maximum changes in single simulation: {state_analysis['max_changes_per_sim']}", file=file)
 
     if state_analysis['changes_per_simulation']:
         changes_dist = Counter(state_analysis['changes_per_simulation'])
-        print(f"\nDistribution of changes per simulation:")
+        print(f"\nDistribution of changes per simulation:", file=file)
         for changes, count in sorted(changes_dist.items()):
-            print(f"   {changes} changes: {count} simulations")
+            print(f"   {changes} changes: {count} simulations", file=file)
 
-    print()
+    print(file=file)
 
 
-def print_trigger_analysis(state_analysis):
+def print_trigger_analysis(state_analysis, file=None):
     """Print analysis of what triggers state changes."""
 
     if not state_analysis['change_triggers']:
-        print("No state change triggers found")
+        print("No state change triggers found", file=file)
         return
 
-    print("🎯 State Change Triggers:")
-    print("-" * 30)
+    print("🎯 State Change Triggers:", file=file)
+    print("-" * 30, file=file)
 
     total_triggers = sum(state_analysis['change_triggers'].values())
 
-    print(f"{'Trigger':<25} {'Count':<8} {'Percentage'}")
-    print("-" * 45)
+    print(f"{'Trigger':<25} {'Count':<8} {'Percentage'}", file=file)
+    print("-" * 45, file=file)
 
     for trigger, count in sorted(state_analysis['change_triggers'].items(),
                                 key=lambda x: x[1], reverse=True):
         percentage = count / total_triggers * 100 if total_triggers > 0 else 0
-        print(f"{trigger:<25} {count:<8} {percentage:6.1f}%")
+        print(f"{trigger:<25} {count:<8} {percentage:6.1f}%", file=file)
 
-    print()
+    print(file=file)
 
 
-def analyze_state_change_patterns(results):
+def analyze_state_change_patterns(results, file=None):
     """Analyze detailed state change patterns."""
 
-    print("🔍 Detailed State Change Patterns:")
-    print("-" * 40)
+    print("🔍 Detailed State Change Patterns:", file=file)
+    print("-" * 40, file=file)
 
     # Collect all state snapshots
     all_snapshots = []
@@ -90,42 +92,42 @@ def analyze_state_change_patterns(results):
                     simulation_changes[sim.task_id].append(snapshot)
 
     if not all_snapshots:
-        print("No state snapshots found")
+        print("No state snapshots found", file=file)
         return
 
-    print(f"Total state snapshots: {len(all_snapshots)}")
+    print(f"Total state snapshots: {len(all_snapshots)}", file=file)
     state_changes = [s for s in all_snapshots if s['state_changed']]
-    print(f"State changes: {len(state_changes)}")
+    print(f"State changes: {len(state_changes)}", file=file)
 
     # Analyze change timing
     if state_changes:
         step_changes = [s['step_idx'] for s in state_changes]
         avg_change_step = sum(step_changes) / len(step_changes)
-        print(f"Average step when changes occur: {avg_change_step:.1f}")
+        print(f"Average step when changes occur: {avg_change_step:.1f}", file=file)
 
         # Changes by step distribution
         step_distribution = Counter(step_changes)
-        print(f"\nState changes by step:")
+        print(f"\nState changes by step:", file=file)
         for step in sorted(step_distribution.keys())[:10]:  # First 10 steps
             count = step_distribution[step]
-            print(f"   Step {step}: {count} changes")
+            print(f"   Step {step}: {count} changes", file=file)
 
     # Analyze change sequences for individual simulations
-    print(f"\nSimulations with most state changes:")
+    print(f"\nSimulations with most state changes:", file=file)
     sorted_sims = sorted(simulation_changes.items(),
                         key=lambda x: len(x[1]), reverse=True)
 
     for i, (task_id, changes) in enumerate(sorted_sims[:5], 1):
-        print(f"\n{i}. Task {task_id}: {len(changes)} changes")
+        print(f"\n{i}. Task {task_id}: {len(changes)} changes", file=file)
         for j, change in enumerate(changes[:3], 1):  # First 3 changes
-            print(f"   {j}. Step {change.step_idx}: {change.triggered_by}")
+            print(f"   {j}. Step {change.step_idx}: {change.triggered_by}", file=file)
 
 
-def analyze_state_consistency(results):
+def analyze_state_consistency(results, file=None):
     """Analyze state consistency across simulations."""
 
-    print(f"\n🔒 State Consistency Analysis:")
-    print("-" * 35)
+    print(f"\n🔒 State Consistency Analysis:", file=file)
+    print("-" * 35, file=file)
 
     # Group simulations by task
     task_simulations = defaultdict(list)
@@ -161,19 +163,19 @@ def analyze_state_consistency(results):
                 })
 
     if consistency_issues:
-        print("⚠️  Consistency Issues Found:")
+        print("⚠️  Consistency Issues Found:", file=file)
         for issue in consistency_issues:
             print(f"   Task {issue['task_id']}: {issue['trials']} trials, "
-                  f"{issue['unique_final_states']} different final states")
+                  f"{issue['unique_final_states']} different final states", file=file)
     else:
-        print("✅ All task trials end in consistent states")
+        print("✅ All task trials end in consistent states", file=file)
 
 
-def analyze_state_hash_patterns(results):
+def analyze_state_hash_patterns(results, file=None):
     """Analyze state hash patterns to understand state evolution."""
 
-    print(f"\n📊 State Hash Evolution Analysis:")
-    print("-" * 40)
+    print(f"\n📊 State Hash Evolution Analysis:", file=file)
+    print("-" * 40, file=file)
 
     # Collect state hash sequences
     hash_sequences = []
@@ -200,35 +202,35 @@ def analyze_state_hash_patterns(results):
                 unique_states_per_sim.append(len(unique_hashes))
 
     if not hash_sequences:
-        print("No state hash data available")
+        print("No state hash data available", file=file)
         return
 
     # Statistics
     avg_unique_states = sum(unique_states_per_sim) / len(unique_states_per_sim)
-    print(f"Average unique states per simulation: {avg_unique_states:.1f}")
+    print(f"Average unique states per simulation: {avg_unique_states:.1f}", file=file)
 
     # Find simulations with unusual state evolution
     high_change_sims = [seq for seq in hash_sequences if seq['unique_states'] > avg_unique_states * 1.5]
     low_change_sims = [seq for seq in hash_sequences if seq['unique_states'] < 2]
 
     if high_change_sims:
-        print(f"\nSimulations with high state variability ({len(high_change_sims)} found):")
+        print(f"\nSimulations with high state variability ({len(high_change_sims)} found):", file=file)
         for seq in sorted(high_change_sims, key=lambda x: x['unique_states'], reverse=True)[:3]:
             print(f"   Task {seq['task_id']} (trial {seq['trial']}): "
-                  f"{seq['unique_states']} unique states in {seq['total_snapshots']} snapshots")
+                  f"{seq['unique_states']} unique states in {seq['total_snapshots']} snapshots", file=file)
 
     if low_change_sims:
-        print(f"\nSimulations with minimal state changes ({len(low_change_sims)} found):")
+        print(f"\nSimulations with minimal state changes ({len(low_change_sims)} found):", file=file)
         for seq in low_change_sims[:3]:
             print(f"   Task {seq['task_id']} (trial {seq['trial']}): "
-                  f"{seq['unique_states']} unique states")
+                  f"{seq['unique_states']} unique states", file=file)
 
 
-def generate_state_recommendations(results, state_analysis):
+def generate_state_recommendations(results, state_analysis, file=None):
     """Generate recommendations based on state analysis."""
 
-    print("\n💡 State Management Recommendations:")
-    print("-" * 40)
+    print("\n💡 State Management Recommendations:", file=file)
+    print("-" * 40, file=file)
 
     recommendations = []
 
@@ -268,7 +270,7 @@ def generate_state_recommendations(results, state_analysis):
     ])
 
     for rec in recommendations:
-        print(rec)
+        print(rec, file=file)
 
 
 def main():
@@ -311,32 +313,28 @@ def main():
         # Run state analysis
         state_analysis = analyze_state_changes(results)
 
-        # Print analysis results
-        print_state_summary(state_analysis)
-        print_trigger_analysis(state_analysis)
-        analyze_state_change_patterns(results)
-        analyze_state_consistency(results)
-        analyze_state_hash_patterns(results)
-        generate_state_recommendations(results, state_analysis)
+        # In-memory buffer to capture detailed report
+        report_buffer = io.StringIO()
+
+        # Generate report content
+        print_state_summary(state_analysis, file=report_buffer)
+        print_trigger_analysis(state_analysis, file=report_buffer)
+        analyze_state_change_patterns(results, file=report_buffer)
+        analyze_state_consistency(results, file=report_buffer)
+        analyze_state_hash_patterns(results, file=report_buffer)
+        generate_state_recommendations(results, state_analysis, file=report_buffer)
+
+        # Get report content and print to console
+        report_content = report_buffer.getvalue()
+        print(report_content)
 
         # Save detailed results to file
         output_file = results_file.parent / f"{results_file.stem}_state_analysis.txt"
         with open(output_file, 'w') as f:
             f.write("ENVIRONMENT STATE ANALYSIS REPORT\n")
             f.write("=" * 50 + "\n\n")
-
-            f.write(f"Results file: {results_file}\n")
-            f.write(f"Total simulations: {len(results.simulations)}\n")
-            f.write(f"Enhanced logging simulations: {len(enhanced_sims)}\n\n")
-
-            f.write(f"STATE CHANGE SUMMARY:\n")
-            f.write(f"Total state changes: {state_analysis['total_state_changes']}\n")
-            f.write(f"Affected simulations: {state_analysis['simulations_with_changes']}\n")
-            f.write(f"Average changes per simulation: {state_analysis['avg_changes_per_sim']:.1f}\n\n")
-
-            f.write("CHANGE TRIGGERS:\n")
-            for trigger, count in state_analysis['change_triggers'].items():
-                f.write(f"{trigger}: {count} times\n")
+            f.write(f"Results file: {results_file}\n\n")
+            f.write(report_content)
 
         print(f"\n💾 Detailed state analysis saved to: {output_file}")
 

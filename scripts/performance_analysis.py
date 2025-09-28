@@ -21,33 +21,35 @@ from tau2.data_model.simulation import Results
 from tau2.metrics.execution_analysis import analyze_performance_bottlenecks
 
 
-def print_performance_summary(perf_analysis):
+import io
+
+def print_performance_summary(perf_analysis, file=None):
     """Print a summary of performance analysis."""
 
-    print("🐌 Performance Analysis Summary:")
-    print("-" * 40)
+    print("🐌 Performance Analysis Summary:", file=file)
+    print("-" * 40, file=file)
 
     if perf_analysis['slowest_tools']:
-        print("Slowest Tools (Average Execution Time):")
+        print("Slowest Tools (Average Execution Time):", file=file)
         for i, (tool_name, avg_time) in enumerate(perf_analysis['slowest_tools'], 1):
-            print(f"   {i:2d}. {tool_name}: {avg_time:8.1f}ms")
+            print(f"   {i:2d}. {tool_name}: {avg_time:8.1f}ms", file=file)
     else:
-        print("No performance data available")
+        print("No performance data available", file=file)
 
-    print()
+    print(file=file)
 
 
-def print_detailed_performance_stats(perf_analysis):
+def print_detailed_performance_stats(perf_analysis, file=None):
     """Print detailed performance statistics for each tool."""
 
     if not perf_analysis['execution_time_stats']:
-        print("No detailed performance statistics available")
+        print("No detailed performance statistics available", file=file)
         return
 
-    print("🔧 Detailed Performance Statistics:")
-    print("-" * 80)
-    print(f"{'Tool Name':<25} {'Count':<8} {'Mean':<10} {'Median':<10} {'Min':<10} {'Max':<10} {'Std Dev':<10}")
-    print("-" * 80)
+    print("🔧 Detailed Performance Statistics:", file=file)
+    print("-" * 80, file=file)
+    print(f"{'Tool Name':<25} {'Count':<8} {'Mean':<10} {'Median':<10} {'Min':<10} {'Max':<10} {'Std Dev':<10}", file=file)
+    print("-" * 80, file=file)
 
     # Sort by mean execution time (slowest first)
     sorted_tools = sorted(
@@ -63,14 +65,14 @@ def print_detailed_performance_stats(perf_analysis):
               f"{stats['median']:<10.1f} "
               f"{stats['min']:<10.1f} "
               f"{stats['max']:<10.1f} "
-              f"{stats['std_dev']:<10.1f}")
+              f"{stats['std_dev']:<10.1f}", file=file)
 
 
-def analyze_performance_patterns(results):
+def analyze_performance_patterns(results, file=None):
     """Analyze performance patterns across simulations."""
 
-    print("\n📊 Performance Pattern Analysis:")
-    print("-" * 40)
+    print("\n📊 Performance Pattern Analysis:", file=file)
+    print("-" * 40, file=file)
 
     # Collect all execution times by tool
     tool_times = {}
@@ -105,11 +107,11 @@ def analyze_performance_patterns(results):
 
     # Performance by simulation
     if simulation_metrics:
-        print("Performance by Simulation:")
+        print("Performance by Simulation:", file=file)
         simulation_metrics.sort(key=lambda x: x['total_time'], reverse=True)
 
-        print(f"{'Task ID':<12} {'Trial':<6} {'Total Time':<12} {'Tool Count':<11} {'Avg/Tool':<10} {'Reward':<8}")
-        print("-" * 70)
+        print(f"{'Task ID':<12} {'Trial':<6} {'Total Time':<12} {'Tool Count':<11} {'Avg/Tool':<10} {'Reward':<8}", file=file)
+        print("-" * 70, file=file)
 
         for i, metrics in enumerate(simulation_metrics[:10], 1):  # Top 10 slowest
             print(f"{metrics['task_id']:<12} "
@@ -117,10 +119,10 @@ def analyze_performance_patterns(results):
                   f"{metrics['total_time']:<12.1f} "
                   f"{metrics['tool_count']:<11} "
                   f"{metrics['avg_time_per_tool']:<10.1f} "
-                  f"{metrics['reward']:<8.3f}")
+                  f"{metrics['reward']:<8.3f}", file=file)
 
     # Tool variability analysis
-    print(f"\nTool Performance Variability:")
+    print(f"\nTool Performance Variability:", file=file)
     high_variance_tools = []
 
     for tool_name, times in tool_times.items():
@@ -134,18 +136,18 @@ def analyze_performance_patterns(results):
 
     if high_variance_tools:
         high_variance_tools.sort(key=lambda x: x[1], reverse=True)  # Sort by CV
-        print("Tools with High Performance Variability:")
+        print("Tools with High Performance Variability:", file=file)
         for tool, cv, mean_time, std_dev, count in high_variance_tools[:5]:
-            print(f"   {tool}: CV={cv:.2f}, Mean={mean_time:.1f}ms ± {std_dev:.1f}ms (n={count})")
+            print(f"   {tool}: CV={cv:.2f}, Mean={mean_time:.1f}ms ± {std_dev:.1f}ms (n={count})", file=file)
     else:
-        print("All tools show consistent performance")
+        print("All tools show consistent performance", file=file)
 
 
-def analyze_correlation_with_success(results):
+def analyze_correlation_with_success(results, file=None):
     """Analyze correlation between execution time and success rates."""
 
-    print(f"\n🎯 Performance vs Success Correlation:")
-    print("-" * 40)
+    print(f"\n🎯 Performance vs Success Correlation:", file=file)
+    print("-" * 40, file=file)
 
     tool_performance = {}
 
@@ -191,9 +193,9 @@ def analyze_correlation_with_success(results):
             })
 
     if correlation_insights:
-        print("Performance Difference: Successful vs Failed Calls")
-        print(f"{'Tool':<20} {'Success Rate':<12} {'Success Avg':<12} {'Failed Avg':<12} {'Difference':<12}")
-        print("-" * 70)
+        print("Performance Difference: Successful vs Failed Calls", file=file)
+        print(f"{'Tool':<20} {'Success Rate':<12} {'Success Avg':<12} {'Failed Avg':<12} {'Difference':<12}", file=file)
+        print("-" * 70, file=file)
 
         for insight in sorted(correlation_insights, key=lambda x: abs(x['time_difference']), reverse=True):
             diff_str = f"{insight['time_difference']:+.1f}ms"
@@ -201,16 +203,16 @@ def analyze_correlation_with_success(results):
                   f"{insight['success_rate']:<12.1%} "
                   f"{insight['success_avg_time']:<12.1f} "
                   f"{insight['failed_avg_time']:<12.1f} "
-                  f"{diff_str:<12}")
+                  f"{diff_str:<12}", file=file)
     else:
-        print("Insufficient data for correlation analysis")
+        print("Insufficient data for correlation analysis", file=file)
 
 
-def generate_performance_recommendations(perf_analysis, results):
+def generate_performance_recommendations(perf_analysis, results, file=None):
     """Generate actionable performance optimization recommendations."""
 
-    print("\n💡 Performance Optimization Recommendations:")
-    print("-" * 50)
+    print("\n💡 Performance Optimization Recommendations:", file=file)
+    print("-" * 50, file=file)
 
     recommendations = []
 
@@ -267,7 +269,7 @@ def generate_performance_recommendations(perf_analysis, results):
     ])
 
     for rec in recommendations:
-        print(rec)
+        print(rec, file=file)
 
 
 def main():
@@ -302,15 +304,32 @@ def main():
         # Run performance analysis
         perf_analysis = analyze_performance_bottlenecks(results)
 
-        # Print analysis results
-        print_performance_summary(perf_analysis)
-        print_detailed_performance_stats(perf_analysis)
-        analyze_performance_patterns(results)
-        analyze_correlation_with_success(results)
-        generate_performance_recommendations(perf_analysis, results)
+        # In-memory buffer to capture detailed report
+        report_buffer = io.StringIO()
+
+        # Generate report content
+        print_performance_summary(perf_analysis, file=report_buffer)
+        print_detailed_performance_stats(perf_analysis, file=report_buffer)
+        analyze_performance_patterns(results, file=report_buffer)
+        analyze_correlation_with_success(results, file=report_buffer)
+        generate_performance_recommendations(perf_analysis, results, file=report_buffer)
+
+        # Get report content and print to console
+        report_content = report_buffer.getvalue()
+        print(report_content)
+
+        # Save detailed text report
+        output_txt_file = results_file.parent / f"{results_file.stem}_performance_analysis.txt"
+        with open(output_txt_file, 'w') as f:
+            f.write("PERFORMANCE ANALYSIS REPORT\n")
+            f.write("=" * 40 + "\n\n")
+            f.write(f"Results file: {results_file}\n\n")
+            f.write(report_content)
+        
+        print(f"\n💾 Detailed performance report saved to: {output_txt_file}")
 
         # Save detailed results to JSON file
-        output_file = results_file.parent / f"{results_file.stem}_performance_analysis.json"
+        output_json_file = results_file.parent / f"{results_file.stem}_performance_analysis.json"
         analysis_data = {
             'file_analyzed': str(results_file),
             'analysis_timestamp': str(Path(__file__).stat().st_mtime),
@@ -322,10 +341,10 @@ def main():
             }
         }
 
-        with open(output_file, 'w') as f:
+        with open(output_json_file, 'w') as f:
             json.dump(analysis_data, f, indent=2, default=str)
 
-        print(f"\n💾 Detailed performance data saved to: {output_file}")
+        print(f"💾 Detailed performance data saved to: {output_json_file}")
 
     except Exception as e:
         print(f"❌ Error analyzing performance: {e}")
