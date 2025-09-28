@@ -1,4 +1,5 @@
 import json
+import time
 from copy import deepcopy
 from datetime import date, datetime
 from typing import Any, Literal, Optional
@@ -17,6 +18,7 @@ from tau2.data_model.tasks import EnvAssertion, EnvFunctionCall, InitializationD
 from tau2.environment.db import DB
 from tau2.environment.tool import Tool
 from tau2.environment.toolkit import ToolKitBase, ToolSignature, get_tool_signatures
+from tau2.environment.execution_logger import ExecutionLogger
 
 
 class EnvironmentInfo(BaseModel):
@@ -43,6 +45,7 @@ class Environment:
         tools: Optional[ToolKitBase] = None,
         user_tools: Optional[ToolKitBase] = None,
         solo_mode: bool = False,
+        execution_logger: Optional["ExecutionLogger"] = None,
     ):
         """
         Environment
@@ -58,6 +61,15 @@ class Environment:
         self.tools = tools
         self.user_tools = user_tools
         self.solo_mode = solo_mode
+
+        # Initialize execution logger
+        if execution_logger is None:
+            # Import here to avoid circular imports
+            from tau2.environment.execution_logger import ExecutionLogger
+            self.execution_logger = ExecutionLogger(enabled=False)
+        else:
+            self.execution_logger = execution_logger
+
         if self.solo_mode:
             self.validate_solo_mode()
         self.sync_tools()
@@ -142,17 +154,52 @@ class Environment:
 
         Note: This does not call sync_tools.
         """
-        if requestor == "user":
-            if self.solo_mode:
-                raise ValueError("User tool calls are not allowed in solo mode")
-            return self.use_user_tool(tool_name=tool_name, **kwargs)
-        elif requestor == "assistant":
-            if self.solo_mode and self.user_tools is not None:
-                if self.user_tools.has_tool(tool_name):
-                    return self.use_user_tool(tool_name=tool_name, **kwargs)
-            return self.use_tool(tool_name=tool_name, **kwargs)
-        else:
-            raise ValueError(f"Invalid requestor: {requestor}")
+        # Generate unique call ID for logging
+        call_id = f"{tool_name}_{len(self.execution_logger.execution_logs)}"
+
+        # Log call start
+        self.execution_logger.log_tool_call_start(tool_name, requestor, kwargs, call_id)
+
+        # Capture pre-call state
+        pre_state_hash = self.get_db_hash()
+
+        start_time = time.time()
+        success = False
+        result = None
+        error = None
+
+        try:
+            # Original tool call logic
+            if requestor == "user":
+                if self.solo_mode:
+                    raise ValueError("User tool calls are not allowed in solo mode")
+                result = self.use_user_tool(tool_name=tool_name, **kwargs)
+            elif requestor == "assistant":
+                if self.solo_mode and self.user_tools is not None:
+                    if self.user_tools.has_tool(tool_name):
+                        result = self.use_user_tool(tool_name=tool_name, **kwargs)
+                    else:
+                        result = self.use_tool(tool_name=tool_name, **kwargs)
+                else:
+                    result = self.use_tool(tool_name=tool_name, **kwargs)
+            else:
+                raise ValueError(f"Invalid requestor: {requestor}")
+
+            success = True
+
+        except Exception as e:
+            error = e
+            raise  # Re-raise original exception
+        finally:
+            execution_time = (time.time() - start_time) * 1000  # Convert to ms
+            self.execution_logger.log_tool_call_end(call_id, success, result, error, execution_time)
+
+            # Log state snapshot if state changed
+            post_state_hash = self.get_db_hash()
+            state_changed = pre_state_hash != post_state_hash
+            self.execution_logger.log_state_snapshot(self, f"post_{tool_name}", state_changed)
+
+        return result
 
     def sync_tools(self):
         """

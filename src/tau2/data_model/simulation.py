@@ -21,6 +21,7 @@ from tau2.config import (
     DEFAULT_SEED,
 )
 from tau2.data_model.message import Message
+from tau2.data_model.logging import ToolExecutionLog, EnvironmentStateSnapshot, ExecutionMetrics
 from tau2.data_model.tasks import Action, EnvAssertion, RewardType, Task
 from tau2.environment.environment import EnvironmentInfo
 from tau2.utils.utils import get_now
@@ -151,6 +152,13 @@ class RunConfig(BaseModel):
         Field(
             description="The log level to use for the simulation",
             default=DEFAULT_LOG_LEVEL,
+        ),
+    ]
+    enable_enhanced_logging: Annotated[
+        bool,
+        Field(
+            description="Enable detailed tool execution logging and environment state tracking",
+            default=False,
         ),
     ]
 
@@ -338,6 +346,20 @@ class SimulationRun(BaseModel):
     trial: Optional[int] = Field(description="Trial number", default=None)
     seed: Optional[int] = Field(
         description="Seed used for the simulation.", default=None
+    )
+
+    # Enhanced logging fields
+    execution_logs: Optional[list[ToolExecutionLog]] = Field(
+        default=None, description="Detailed tool execution logs"
+    )
+    state_snapshots: Optional[list[EnvironmentStateSnapshot]] = Field(
+        default=None, description="Environment state snapshots"
+    )
+    execution_metrics: Optional[ExecutionMetrics] = Field(
+        default=None, description="High-level execution metrics"
+    )
+    enhanced_logging_enabled: bool = Field(
+        default=False, description="Whether enhanced logging was enabled for this run"
     )
 
 

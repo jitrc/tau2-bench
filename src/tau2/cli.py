@@ -128,6 +128,11 @@ def add_run_args(parser):
         default=DEFAULT_LOG_LEVEL,
         help=f"The log level to use for the simulation. Default is {DEFAULT_LOG_LEVEL}.",
     )
+    parser.add_argument(
+        "--enhanced-logging",
+        action="store_true",
+        help="Enable detailed tool execution logging and environment state tracking.",
+    )
 
 
 def main():
@@ -157,6 +162,7 @@ def main():
                 max_concurrency=args.max_concurrency,
                 seed=args.seed,
                 log_level=args.log_level,
+                enable_enhanced_logging=args.enhanced_logging,
             )
         )
     )

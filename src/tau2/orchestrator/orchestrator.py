@@ -53,6 +53,7 @@ class Orchestrator:
         max_errors: int = 10,
         seed: Optional[int] = None,
         solo_mode: bool = False,
+        enable_enhanced_logging: bool = False,
     ):
         self.domain = domain
         self.agent = agent
@@ -73,6 +74,11 @@ class Orchestrator:
         self.from_role: Optional[Role] = None
         self.to_role: Optional[Role] = None
         self.message: Optional[Message] = None
+
+        # Enable enhanced logging if requested
+        if enable_enhanced_logging and not self.environment.execution_logger.enabled:
+            from tau2.environment.execution_logger import ExecutionLogger
+            self.environment.execution_logger = ExecutionLogger(enabled=True)
 
     def initialize(self):
         """
@@ -251,8 +257,17 @@ class Orchestrator:
         start_time = get_now()
         start = time.perf_counter()
         self.initialize()
+
+        # Log initial state if enhanced logging is enabled
+        if self.environment.execution_logger.enabled:
+            self.environment.execution_logger.log_state_snapshot(
+                self.environment, "simulation_start", False
+            )
         while not self.done:
             self.step()
+            # Update step counter for logging
+            if self.environment.execution_logger.enabled:
+                self.environment.execution_logger.current_step_idx = self.step_count
             if self.step_count >= self.max_steps:
                 self.done = True
                 self.termination_reason = TerminationReason.MAX_STEPS
@@ -279,6 +294,14 @@ class Orchestrator:
             messages=messages,
             seed=self.seed,
         )
+
+        # Add logging data if enhanced logging is enabled
+        if self.environment.execution_logger.enabled:
+            simulation_run.execution_logs = self.environment.execution_logger.execution_logs
+            simulation_run.state_snapshots = self.environment.execution_logger.state_snapshots
+            simulation_run.execution_metrics = self.environment.execution_logger.get_execution_metrics()
+            simulation_run.enhanced_logging_enabled = True
+
         return simulation_run
 
     def step(self):
