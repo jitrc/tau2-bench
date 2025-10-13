@@ -2,360 +2,217 @@
 Execution Analysis Tools for Enhanced Logging Data
 
 This module provides utilities for analyzing enhanced logging data from tau2-bench simulations.
+All analysis functions are designed to work with streams of simulations to keep memory usage low.
 """
 
-from typing import List, Dict, Any
+from typing import Dict, Any, Iterable
 from collections import defaultdict, Counter
 import statistics
 
-from tau2.data_model.simulation import Results, SimulationRun
-from tau2.data_model.logging import ToolExecutionLog, EnvironmentStateSnapshot, ExecutionMetrics, ContextUsageSnapshot
+from tau2.data_model.simulation import SimulationRun
 
 
-def analyze_tool_failures(results: Results) -> Dict[str, Any]:
-    """Analyze tool failure patterns across simulations."""
-    analysis = {
-        "total_simulations": len(results.simulations),
-        "enhanced_logging_simulations": 0,
-        "tool_failure_stats": {},
-        "most_failing_tools": [],
-        "failure_patterns": {}
-    }
-
-    enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-    analysis["enhanced_logging_simulations"] = len(enhanced_sims)
-
-    if not enhanced_sims:
-        return analysis
-
-    # Collect all tool execution logs
-    all_logs = []
-    for sim in enhanced_sims:
-        if sim.execution_logs:
-            all_logs.extend(sim.execution_logs)
-
-    if not all_logs:
-        return analysis
-
-    # Analyze failure patterns
+def run_streaming_analysis(simulations: Iterable[SimulationRun]) -> Dict[str, Any]:
+    """
+    Run a comprehensive analysis by streaming simulations. This is the core
+    function that processes simulations in a single pass to generate all metrics.
+    """
+    # Initialize accumulators
+    total_simulations = 0
+    enhanced_logging_simulations = 0
+    
+    # Tool failure stats
     tool_stats = defaultdict(lambda: {"total": 0, "failed": 0, "avg_time": []})
     error_patterns = Counter()
 
-    for log in all_logs:
-        tool_stats[log.tool_name]["total"] += 1
-        if log.execution_time_ms:
-            tool_stats[log.tool_name]["avg_time"].append(log.execution_time_ms)
-
-        if not log.success:
-            tool_stats[log.tool_name]["failed"] += 1
-            if log.error_details:
-                # Extract error type
-                error_type = log.error_details.split(':')[0] if ':' in log.error_details else log.error_details[:50]
-                error_patterns[error_type] += 1
-
-    # Calculate failure rates and average times
-    for tool_name, stats in tool_stats.items():
-        stats["failure_rate"] = stats["failed"] / stats["total"] if stats["total"] > 0 else 0
-        stats["avg_execution_time"] = statistics.mean(stats["avg_time"]) if stats["avg_time"] else 0
-
-    analysis["tool_failure_stats"] = dict(tool_stats)
-
-    # Find most failing tools
-    failing_tools = [(name, stats["failure_rate"]) for name, stats in tool_stats.items()
-                     if stats["failure_rate"] > 0]
-    analysis["most_failing_tools"] = sorted(failing_tools, key=lambda x: x[1], reverse=True)[:5]
-
-    # Common error patterns
-    analysis["failure_patterns"] = dict(error_patterns.most_common(10))
-
-    return analysis
-
-
-def analyze_performance_bottlenecks(results: Results) -> Dict[str, Any]:
-    """Identify performance bottlenecks in tool execution."""
-    analysis = {
-        "slowest_tools": [],
-        "execution_time_stats": {},
-        "performance_trends": {}
-    }
-
-    enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-    if not enhanced_sims:
-        return analysis
-
-    # Collect execution times by tool
+    # Performance stats
     tool_times = defaultdict(list)
-    for sim in enhanced_sims:
+
+    # State change stats
+    total_state_changes = 0
+    changes_per_simulation = []
+    change_triggers = Counter()
+    simulations_with_changes = 0
+    db_changes_summary = Counter()
+
+    # Context usage stats
+    total_snapshots = 0
+    prompt_tokens, completion_tokens, total_tokens = [], [], []
+    context_usages = []
+    models_analyzed = set()
+    usage_by_trigger = defaultdict(lambda: {"count": 0, "total_tokens": 0})
+
+    # Single pass over the simulation stream
+    for sim in simulations:
+        total_simulations += 1
+        if not sim.enhanced_logging_enabled:
+            continue
+        enhanced_logging_simulations += 1
+
+        # Tool failures and performance
         if sim.execution_logs:
             for log in sim.execution_logs:
-                if log.execution_time_ms is not None and log.success:
-                    tool_times[log.tool_name].append(log.execution_time_ms)
+                tool_stats[log.tool_name]["total"] += 1
+                if log.execution_time_ms is not None:
+                    tool_stats[log.tool_name]["avg_time"].append(log.execution_time_ms)
+                    if log.success:
+                        tool_times[log.tool_name].append(log.execution_time_ms)
+                if not log.success:
+                    tool_stats[log.tool_name]["failed"] += 1
+                    if log.error_details:
+                        error_type = log.error_details.split(':')[0] if ':' in log.error_details else log.error_details[:50]
+                        error_patterns[error_type] += 1
+        
+        # State changes
+        changes_in_sim = 0
+        if sim.state_snapshots:
+            changes_in_sim = sum(1 for s in sim.state_snapshots if s.state_changed)
+            if changes_in_sim > 0:
+                simulations_with_changes += 1
+                total_state_changes += changes_in_sim
+                for s in sim.state_snapshots:
+                    if s.state_changed:
+                        change_triggers[s.triggered_by] += 1
+                        if hasattr(s, 'db_diff') and s.db_diff:
+                            for change_type, changes in s.db_diff.items():
+                                if changes:
+                                    for key in changes.keys():
+                                        db_changes_summary[f"{change_type}:{key}"] += 1
+        changes_per_simulation.append(changes_in_sim)
+        
+        # Context usage
+        if sim.context_usage_snapshots:
+            total_snapshots += len(sim.context_usage_snapshots)
+            for s in sim.context_usage_snapshots:
+                prompt_tokens.append(s.prompt_tokens)
+                completion_tokens.append(s.completion_tokens)
+                total_tokens.append(s.total_tokens)
+                if s.context_window_used is not None:
+                    context_usages.append(s.context_window_used)
+                if hasattr(s, 'model_context_limit') and s.model_context_limit:
+                    model_limits = { 8192: "gpt-4", 128000: "gpt-4o/gpt-4o-mini", 200000: "claude-3", 16385: "gpt-3.5-turbo" }
+                    if s.model_context_limit in model_limits:
+                        models_analyzed.add(model_limits[s.model_context_limit])
+                usage_by_trigger[s.triggered_by]["count"] += 1
+                usage_by_trigger[s.triggered_by]["total_tokens"] += s.total_tokens
 
-    # Calculate statistics for each tool
+    # Finalize calculations
+    for stats in tool_stats.values():
+        stats["failure_rate"] = stats["failed"] / stats["total"] if stats["total"] > 0 else 0
+        stats["avg_execution_time"] = statistics.mean(stats["avg_time"]) if stats["avg_time"] else 0
+    
+    execution_time_stats = {}
     for tool_name, times in tool_times.items():
         if times:
-            analysis["execution_time_stats"][tool_name] = {
-                "mean": statistics.mean(times),
-                "median": statistics.median(times),
+            execution_time_stats[tool_name] = {
+                "mean": statistics.mean(times), "median": statistics.median(times),
                 "std_dev": statistics.stdev(times) if len(times) > 1 else 0,
-                "min": min(times),
-                "max": max(times),
-                "count": len(times)
+                "min": min(times), "max": max(times), "count": len(times)
             }
 
-    # Find slowest tools
-    if analysis["execution_time_stats"]:
-        slowest = sorted(analysis["execution_time_stats"].items(),
-                        key=lambda x: x[1]["mean"], reverse=True)[:5]
-        analysis["slowest_tools"] = [(name, stats["mean"]) for name, stats in slowest]
-
-    return analysis
-
-
-def analyze_state_changes(results: Results) -> Dict[str, Any]:
-    """Analyze environment state change patterns."""
-    analysis = {
-        "total_state_changes": 0,
-        "changes_per_simulation": [],
-        "change_triggers": Counter(),
-        "simulations_with_changes": 0,
-        "db_changes_summary": {},
-        "most_common_db_changes": []
-    }
-
-    enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-    if not enhanced_sims:
-        return analysis
-
-    for sim in enhanced_sims:
-        if sim.state_snapshots:
-            changes_in_sim = sum(1 for snapshot in sim.state_snapshots if snapshot.state_changed)
-            analysis["changes_per_simulation"].append(changes_in_sim)
-            analysis["total_state_changes"] += changes_in_sim
-
-            if changes_in_sim > 0:
-                analysis["simulations_with_changes"] += 1
-
-            # Track what triggered state changes and analyze db diffs
-            for snapshot in sim.state_snapshots:
-                if snapshot.state_changed:
-                    analysis["change_triggers"][snapshot.triggered_by] += 1
-
-                    # Analyze database diffs if available
-                    if hasattr(snapshot, 'db_diff') and snapshot.db_diff:
-                        db_diff = snapshot.db_diff
-                        for change_type in ['added', 'modified', 'removed']:
-                            if db_diff.get(change_type):
-                                for key in db_diff[change_type].keys():
-                                    change_key = f"{change_type}:{key}"
-                                    if change_key not in analysis["db_changes_summary"]:
-                                        analysis["db_changes_summary"][change_key] = 0
-                                    analysis["db_changes_summary"][change_key] += 1
-
-    # Calculate statistics
-    if analysis["changes_per_simulation"]:
-        analysis["avg_changes_per_sim"] = statistics.mean(analysis["changes_per_simulation"])
-        analysis["max_changes_per_sim"] = max(analysis["changes_per_simulation"])
-    else:
-        analysis["avg_changes_per_sim"] = 0
-        analysis["max_changes_per_sim"] = 0
-
-    analysis["change_triggers"] = dict(analysis["change_triggers"])
-
-    # Find most common database changes
-    if analysis["db_changes_summary"]:
-        analysis["most_common_db_changes"] = sorted(
-            analysis["db_changes_summary"].items(),
-            key=lambda x: x[1], reverse=True
-        )[:5]  # Top 5 most common changes
-
-    return analysis
-
-
-def analyze_context_usage(results: Results) -> Dict[str, Any]:
-    """Analyze context/token usage patterns across simulations."""
-    analysis = {
-        "total_snapshots": 0,
-        "token_usage_stats": {},
-        "context_window_usage": {},
-        "high_usage_warnings": 0,
-        "models_analyzed": set(),
-        "usage_by_trigger": {}
-    }
-
-    enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-    if not enhanced_sims:
-        return analysis
-
-    all_snapshots = []
-    for sim in enhanced_sims:
-        if sim.context_usage_snapshots:
-            all_snapshots.extend(sim.context_usage_snapshots)
-
-    analysis["total_snapshots"] = len(all_snapshots)
-
-    if not all_snapshots:
-        return analysis
-
-    # Collect token usage stats
-    prompt_tokens = [s.prompt_tokens for s in all_snapshots]
-    completion_tokens = [s.completion_tokens for s in all_snapshots]
-    total_tokens = [s.total_tokens for s in all_snapshots]
-
-    if prompt_tokens:
-        analysis["token_usage_stats"] = {
-            "prompt_tokens": {
-                "total": sum(prompt_tokens),
-                "mean": statistics.mean(prompt_tokens),
-                "max": max(prompt_tokens),
-                "min": min(prompt_tokens)
-            },
-            "completion_tokens": {
-                "total": sum(completion_tokens),
-                "mean": statistics.mean(completion_tokens),
-                "max": max(completion_tokens),
-                "min": min(completion_tokens)
-            },
-            "total_tokens": {
-                "total": sum(total_tokens),
-                "mean": statistics.mean(total_tokens),
-                "max": max(total_tokens),
-                "min": min(total_tokens)
-            }
-        }
-
-    # Analyze context window usage
-    context_usages = [s.context_window_used for s in all_snapshots if s.context_window_used is not None]
-    if context_usages:
-        analysis["context_window_usage"] = {
-            "mean_usage": statistics.mean(context_usages),
-            "max_usage": max(context_usages),
-            "min_usage": min(context_usages),
-            "high_usage_count": sum(1 for usage in context_usages if usage > 80.0)
-        }
-        analysis["high_usage_warnings"] = analysis["context_window_usage"]["high_usage_count"]
-
-    # Track models analyzed
-    models = set()
-    for s in all_snapshots:
-        if hasattr(s, 'model_context_limit') and s.model_context_limit:
-            # Try to extract model name from limit mapping
-            model_limits = {
-                8192: "gpt-4",
-                128000: "gpt-4o/gpt-4o-mini",
-                200000: "claude-3",
-                16385: "gpt-3.5-turbo"
-            }
-            if s.model_context_limit in model_limits:
-                models.add(model_limits[s.model_context_limit])
-    analysis["models_analyzed"] = list(models)
-
-    # Analyze usage by trigger
-    trigger_stats = defaultdict(lambda: {"count": 0, "total_tokens": 0, "avg_tokens": 0})
-    for s in all_snapshots:
-        trigger_stats[s.triggered_by]["count"] += 1
-        trigger_stats[s.triggered_by]["total_tokens"] += s.total_tokens
-
-    for trigger, stats in trigger_stats.items():
+    for trigger, stats in usage_by_trigger.items():
         stats["avg_tokens"] = stats["total_tokens"] / stats["count"] if stats["count"] > 0 else 0
 
-    analysis["usage_by_trigger"] = dict(trigger_stats)
-
-    return analysis
-
-
-def analyze_database_diffs(results: Results) -> Dict[str, Any]:
-    """Analyze detailed database diff patterns across simulations."""
-    analysis = {
-        "snapshots_with_diffs": 0,
-        "total_db_changes": 0,
-        "detailed_changes": [],
-        "change_patterns": {},
-        "fields_changed_most": Counter(),
-        "change_types_distribution": Counter()
+    # Assemble analysis dictionaries
+    failure_analysis = {
+        "total_simulations": total_simulations,
+        "enhanced_logging_simulations": enhanced_logging_simulations,
+        "tool_failure_stats": dict(tool_stats),
+        "most_failing_tools": sorted([(name, stats["failure_rate"]) for name, stats in tool_stats.items() if stats["failure_rate"] > 0], key=lambda x: x[1], reverse=True)[:5],
+        "failure_patterns": dict(error_patterns.most_common(10))
     }
 
-    enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-    if not enhanced_sims:
-        return analysis
+    performance_analysis = {
+        "slowest_tools": [(name, stats["mean"]) for name, stats in sorted(execution_time_stats.items(), key=lambda x: x[1]["mean"], reverse=True)[:5]],
+        "execution_time_stats": execution_time_stats
+    }
 
-    for sim in enhanced_sims:
-        if sim.state_snapshots:
-            for snapshot in sim.state_snapshots:
-                if hasattr(snapshot, 'db_diff') and snapshot.db_diff:
-                    analysis["snapshots_with_diffs"] += 1
-                    db_diff = snapshot.db_diff
+    state_analysis = {
+        "total_state_changes": total_state_changes,
+        "changes_per_simulation": changes_per_simulation,
+        "change_triggers": dict(change_triggers),
+        "simulations_with_changes": simulations_with_changes,
+        "db_changes_summary": dict(db_changes_summary),
+        "most_common_db_changes": db_changes_summary.most_common(5),
+        "avg_changes_per_sim": statistics.mean(changes_per_simulation) if changes_per_simulation else 0,
+        "max_changes_per_sim": max(changes_per_simulation) if changes_per_simulation else 0
+    }
 
-                    change_summary = {
-                        "simulation_id": sim.id,
-                        "step_idx": snapshot.step_idx,
-                        "triggered_by": snapshot.triggered_by,
-                        "timestamp": snapshot.timestamp,
-                        "changes": db_diff
-                    }
-                    analysis["detailed_changes"].append(change_summary)
+    context_analysis = {
+        "total_snapshots": total_snapshots,
+        "token_usage_stats": {
+            "prompt_tokens": {"total": sum(prompt_tokens), "mean": statistics.mean(prompt_tokens), "max": max(prompt_tokens), "min": min(prompt_tokens)} if prompt_tokens else {},
+            "completion_tokens": {"total": sum(completion_tokens), "mean": statistics.mean(completion_tokens), "max": max(completion_tokens), "min": min(completion_tokens)} if completion_tokens else {},
+            "total_tokens": {"total": sum(total_tokens), "mean": statistics.mean(total_tokens), "max": max(total_tokens), "min": min(total_tokens)} if total_tokens else {}
+        },
+        "context_window_usage": {"mean_usage": statistics.mean(context_usages), "max_usage": max(context_usages), "min_usage": min(context_usages), "high_usage_count": sum(1 for u in context_usages if u > 80.0)} if context_usages else {},
+        "high_usage_warnings": sum(1 for u in context_usages if u > 80.0),
+        "models_analyzed": list(models_analyzed),
+        "usage_by_trigger": dict(usage_by_trigger)
+    }
 
-                    # Analyze change patterns
-                    for change_type in ['added', 'modified', 'removed']:
-                        if db_diff.get(change_type):
-                            analysis["change_types_distribution"][change_type] += len(db_diff[change_type])
-                            analysis["total_db_changes"] += len(db_diff[change_type])
-
-                            for field_name in db_diff[change_type].keys():
-                                analysis["fields_changed_most"][field_name] += 1
-
-    return analysis
+    return {
+        "overview": {"total_simulations": total_simulations, "enhanced_logging_simulations": enhanced_logging_simulations},
+        "failure_analysis": failure_analysis,
+        "performance_analysis": performance_analysis,
+        "state_analysis": state_analysis,
+        "context_analysis": context_analysis
+    }
 
 
-def generate_execution_report(results: Results) -> str:
-    """Generate a comprehensive execution analysis report."""
-    if not any(sim.enhanced_logging_enabled for sim in results.simulations):
+def analyze_tool_failures(simulations: Iterable[SimulationRun]) -> Dict[str, Any]:
+    """Analyze tool failure patterns from a stream of simulations."""
+    return run_streaming_analysis(simulations)["failure_analysis"]
+
+
+def analyze_performance_bottlenecks(simulations: Iterable[SimulationRun]) -> Dict[str, Any]:
+    """Identify performance bottlenecks from a stream of simulations."""
+    return run_streaming_analysis(simulations)["performance_analysis"]
+
+
+def analyze_state_changes(simulations: Iterable[SimulationRun]) -> Dict[str, Any]:
+    """Analyze environment state change patterns from a stream of simulations."""
+    return run_streaming_analysis(simulations)["state_analysis"]
+
+
+def generate_execution_report(simulations: Iterable[SimulationRun]) -> str:
+    """Generate a comprehensive execution analysis report from a stream of simulations."""
+    
+    all_analyses = run_streaming_analysis(simulations)
+    overview = all_analyses["overview"]
+    failure_analysis = all_analyses["failure_analysis"]
+    performance_analysis = all_analyses["performance_analysis"]
+    state_analysis = all_analyses["state_analysis"]
+    context_analysis = all_analyses["context_analysis"]
+
+    if overview['enhanced_logging_simulations'] == 0:
         return "❌ No enhanced logging data found in results. Run simulations with --enhanced-logging flag."
 
-    failure_analysis = analyze_tool_failures(results)
-    performance_analysis = analyze_performance_bottlenecks(results)
-    state_analysis = analyze_state_changes(results)
-    context_analysis = analyze_context_usage(results)
-
     report_lines = [
-        "🔍 Enhanced Logging Analysis Report",
-        "=" * 50,
-        "",
+        "🔍 Enhanced Logging Analysis Report", "=" * 50, "",
         f"📊 Overview:",
-        f"   • Total simulations: {failure_analysis['total_simulations']}",
-        f"   • Enhanced logging enabled: {failure_analysis['enhanced_logging_simulations']}",
-        ""
+        f"   • Total simulations: {overview['total_simulations']}",
+        f"   • Enhanced logging enabled: {overview['enhanced_logging_simulations']}", ""
     ]
 
     # Tool failure analysis
     if failure_analysis["most_failing_tools"]:
-        report_lines.extend([
-            "❌ Tool Failure Analysis:",
-            f"   • Most failing tools:"
-        ])
+        report_lines.extend(["❌ Tool Failure Analysis:", "   • Most failing tools:"])
         for tool_name, failure_rate in failure_analysis["most_failing_tools"]:
             report_lines.append(f"     - {tool_name}: {failure_rate:.1%} failure rate")
-
         if failure_analysis["failure_patterns"]:
-            report_lines.extend([
-                f"   • Common error patterns:"
-            ])
+            report_lines.append("   • Common error patterns:")
             for error, count in list(failure_analysis["failure_patterns"].items())[:3]:
                 report_lines.append(f"     - {error}: {count} occurrences")
     else:
         report_lines.append("✅ No tool failures detected!")
-
     report_lines.append("")
 
     # Performance analysis
     if performance_analysis["slowest_tools"]:
-        report_lines.extend([
-            "🐌 Performance Bottlenecks:",
-            f"   • Slowest tools (average execution time):"
-        ])
+        report_lines.extend(["🐌 Performance Bottlenecks:", "   • Slowest tools (average execution time):"])
         for tool_name, avg_time in performance_analysis["slowest_tools"]:
             report_lines.append(f"     - {tool_name}: {avg_time:.1f}ms")
-
     report_lines.append("")
 
     # State change analysis
@@ -365,43 +222,28 @@ def generate_execution_report(results: Results) -> str:
         f"   • Simulations with changes: {state_analysis['simulations_with_changes']}",
         f"   • Average changes per simulation: {state_analysis['avg_changes_per_sim']:.1f}"
     ])
-
     if state_analysis["change_triggers"]:
-        report_lines.extend([
-            f"   • Most common triggers:"
-        ])
-        sorted_triggers = sorted(state_analysis["change_triggers"].items(),
-                               key=lambda x: x[1], reverse=True)[:3]
-        for trigger, count in sorted_triggers:
+        report_lines.append("   • Most common triggers:")
+        for trigger, count in sorted(state_analysis["change_triggers"].items(), key=lambda x: x[1], reverse=True)[:3]:
             report_lines.append(f"     - {trigger}: {count} times")
-
-    # Database changes analysis
     if state_analysis["most_common_db_changes"]:
-        report_lines.extend([
-            f"   • Most common database changes:"
-        ])
+        report_lines.append("   • Most common database changes:")
         for change_desc, count in state_analysis["most_common_db_changes"][:3]:
             change_type, field = change_desc.split(':', 1)
             report_lines.append(f"     - {field} ({change_type}): {count} times")
-
     report_lines.append("")
 
     # Context usage analysis
     if context_analysis["total_snapshots"] > 0:
-        report_lines.extend([
-            "📊 Context/Token Usage Analysis:",
-            f"   • Total context snapshots: {context_analysis['total_snapshots']}"
-        ])
-
-        if context_analysis["token_usage_stats"]:
-            token_stats = context_analysis["token_usage_stats"]
+        report_lines.extend(["📊 Context/Token Usage Analysis:", f"   • Total context snapshots: {context_analysis['total_snapshots']}"])
+        if context_analysis["token_usage_stats"].get("total_tokens"):
+            token_stats = context_analysis["token_usage_stats"]["total_tokens"]
             report_lines.extend([
                 f"   • Token usage:",
-                f"     - Total tokens used: {token_stats['total_tokens']['total']:,}",
-                f"     - Average tokens per call: {token_stats['total_tokens']['mean']:.1f}",
-                f"     - Max tokens in single call: {token_stats['total_tokens']['max']:,}"
+                f"     - Total tokens used: {token_stats['total']:,}",
+                f"     - Average tokens per call: {token_stats['mean']:.1f}",
+                f"     - Max tokens in single call: {token_stats['max']:,}"
             ])
-
         if context_analysis["context_window_usage"]:
             ctx_stats = context_analysis["context_window_usage"]
             report_lines.extend([
@@ -409,26 +251,20 @@ def generate_execution_report(results: Results) -> str:
                 f"     - Average usage: {ctx_stats['mean_usage']:.1f}%",
                 f"     - Peak usage: {ctx_stats['max_usage']:.1f}%"
             ])
-
             if context_analysis["high_usage_warnings"] > 0:
                 report_lines.append(f"     - ⚠️  High usage warnings (>80%): {context_analysis['high_usage_warnings']}")
-
         if context_analysis["models_analyzed"]:
-            models_str = ", ".join(context_analysis["models_analyzed"])
-            report_lines.append(f"   • Models analyzed: {models_str}")
-
+            report_lines.append(f"   • Models analyzed: {', '.join(context_analysis['models_analyzed'])}")
         if context_analysis["usage_by_trigger"]:
             report_lines.append(f"   • Usage by trigger:")
-            sorted_triggers = sorted(context_analysis["usage_by_trigger"].items(),
-                                   key=lambda x: x[1]["avg_tokens"], reverse=True)[:3]
+            sorted_triggers = sorted(context_analysis["usage_by_trigger"].items(), key=lambda x: x[1]["avg_tokens"], reverse=True)[:3]
             for trigger, stats in sorted_triggers:
                 report_lines.append(f"     - {trigger}: {stats['avg_tokens']:.0f} avg tokens ({stats['count']} calls)")
     else:
         report_lines.append("📊 No context usage data available")
 
     report_lines.extend([
-        "",
-        "💡 Tips:",
+        "", "💡 Tips:",
         "   • Use this data to identify which tools need optimization",
         "   • High failure rates may indicate validation issues",
         "   • Slow tools could benefit from performance improvements",

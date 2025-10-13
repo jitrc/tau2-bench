@@ -16,11 +16,12 @@ from collections import Counter
 # Add src to path so we can import tau2 modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from tau2.data_model.simulation import Results
+from tau2.data_model.simulation import Results, SimulationRun
 from tau2.metrics.execution_analysis import analyze_tool_failures
 
 
 import io
+from typing import Iterable
 
 def print_failure_summary(failure_analysis, file=None):
     """Print a summary of tool failure analysis."""
@@ -74,7 +75,7 @@ def print_detailed_tool_stats(failure_analysis, file=None):
             print(f"   Status:      {status}", file=file)
 
 
-def analyze_failure_patterns(results, file=None):
+def analyze_failure_patterns(simulations: Iterable[SimulationRun], file=None):
     """Analyze specific failure patterns and provide insights."""
 
     print("\n🕵️ Failure Pattern Analysis:", file=file)
@@ -82,7 +83,7 @@ def analyze_failure_patterns(results, file=None):
 
     # Collect all failed tool calls
     failed_calls = []
-    for sim in results.simulations:
+    for sim in simulations:
         if sim.enhanced_logging_enabled and sim.execution_logs:
             for log in sim.execution_logs:
                 if not log.success:
@@ -201,21 +202,25 @@ def main():
         sys.exit(1)
 
     try:
-        # Load simulation results
         print(f"🔍 Analyzing tool failures in: {results_file}")
-        results = Results.load(str(results_file))
+        
+        # Use a generator to stream simulations
+        simulations_stream = Results.stream_simulations(results_file)
+        
+        # The stream can only be consumed once. We need to pass it to a function that
+        # can handle it, or convert it to a list if multiple functions need it.
+        # For memory efficiency, we'll consume it once.
+        
+        # Since analyze_tool_failures now consumes the stream, we need to get all
+        # necessary data from it.
+        failure_analysis = analyze_tool_failures(simulations_stream)
 
-        # Check if enhanced logging data is available
-        enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-        if not enhanced_sims:
+        if failure_analysis['enhanced_logging_simulations'] == 0:
             print("❌ No enhanced logging data found in results!")
             print("Run simulations with --enhanced-logging flag to enable failure analysis")
             return
 
         print("=" * 80)
-
-        # Run failure analysis
-        failure_analysis = analyze_tool_failures(results)
 
         # In-memory buffer to capture detailed report
         report_buffer = io.StringIO()
@@ -223,7 +228,11 @@ def main():
         # Generate report content
         print_failure_summary(failure_analysis, file=report_buffer)
         print_detailed_tool_stats(failure_analysis, file=report_buffer)
-        analyze_failure_patterns(results, file=report_buffer)
+        
+        # analyze_failure_patterns needs to re-stream or get data from somewhere.
+        # We will re-stream for simplicity here, as it's a separate concern.
+        analyze_failure_patterns(Results.stream_simulations(results_file), file=report_buffer)
+        
         generate_recommendations(failure_analysis, file=report_buffer)
 
         # Get report content and print to console

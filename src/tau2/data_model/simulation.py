@@ -1,10 +1,11 @@
 from copy import deepcopy
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Generator
 
+import ijson
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing_extensions import Annotated
 
 from tau2.config import (
@@ -389,6 +390,19 @@ class Results(BaseModel):
         """
         with open(path, "w") as f:
             f.write(self.model_dump_json(indent=4))
+
+    @staticmethod
+    def stream_simulations(path: Path) -> Generator["SimulationRun", None, None]:
+        """
+        Stream simulations from a results file to avoid loading everything into memory.
+        """
+        with open(path, "rb") as f:
+            for item in ijson.items(f, "simulations.item"):
+                try:
+                    yield SimulationRun.model_validate(item)
+                except ValidationError as e:
+                    print(f"⚠️ Warning: Skipping a simulation due to validation error: {e}")
+                    continue
 
     def to_df(self) -> pd.DataFrame:
         """

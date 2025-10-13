@@ -14,16 +14,17 @@ from pathlib import Path
 from collections import Counter, defaultdict
 import statistics
 import json
+from typing import List
 
 # Add src to path so we can import tau2 modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from tau2.data_model.simulation import Results
+from tau2.data_model.simulation import Results, SimulationRun
 
 
 import io
 
-def find_timeout_patterns(results, file=None):
+def find_timeout_patterns(simulations: List[SimulationRun], file=None):
     """Find timeout-related issues and patterns."""
 
     print("⏰ Timeout Pattern Analysis:", file=file)
@@ -31,7 +32,7 @@ def find_timeout_patterns(results, file=None):
 
     timeouts = []
 
-    for sim in results.simulations:
+    for sim in simulations:
         if sim.enhanced_logging_enabled and sim.execution_logs:
             for log in sim.execution_logs:
                 if log.error_details and 'timeout' in log.error_details.lower():
@@ -57,85 +58,51 @@ def find_timeout_patterns(results, file=None):
     for tool, count in timeout_by_tool.most_common():
         print(f"   {tool}: {count} timeouts", file=file)
 
-    # Analyze by arguments (common patterns)
-    print(f"\nTimeout examples:", file=file)
-    for i, issue in enumerate(timeouts[:5], 1):
-        args_preview = str(issue['arguments'])[:100]
-        print(f"   {i}. Task {issue['task_id']}: {issue['tool_name']} - {issue['error']}", file=file)
-        print(f"      Args: {args_preview}", file=file)
-
     return timeouts
 
 
-def analyze_tool_usage_patterns(results, file=None):
+def analyze_tool_usage_patterns(simulations: List[SimulationRun], file=None):
     """Analyze which tools are used together frequently."""
 
     print("\n🔗 Tool Usage Pattern Analysis:", file=file)
     print("-" * 35, file=file)
 
-    tool_sequences = []
     tool_pairs = []
 
-    for sim in results.simulations:
+    for sim in simulations:
         if sim.enhanced_logging_enabled and sim.execution_logs:
-            # Get sequence of successful tool calls
             successful_tools = [log.tool_name for log in sim.execution_logs if log.success]
-
             if len(successful_tools) > 1:
-                tool_sequences.append({
-                    'task_id': sim.task_id,
-                    'sequence': successful_tools
-                })
-
-                # Extract tool pairs (bigrams)
                 for i in range(len(successful_tools) - 1):
-                    pair = (successful_tools[i], successful_tools[i + 1])
-                    tool_pairs.append(pair)
+                    tool_pairs.append((successful_tools[i], successful_tools[i + 1]))
 
     if not tool_pairs:
         print("No tool usage patterns found", file=file)
-        return
+        return []
 
-    # Most common tool pairs
     common_pairs = Counter(tool_pairs).most_common(10)
-
     print("Most Common Tool Sequences (Tool A → Tool B):", file=file)
     for (tool_a, tool_b), count in common_pairs:
         print(f"   {tool_a} → {tool_b}: {count} times", file=file)
 
-    # Analyze sequence lengths
-    if tool_sequences:
-        sequence_lengths = [len(seq['sequence']) for seq in tool_sequences]
-        avg_length = statistics.mean(sequence_lengths)
-        print(f"\nSequence Statistics:", file=file)
-        print(f"   Average tools per simulation: {avg_length:.1f}", file=file)
-        print(f"   Longest sequence: {max(sequence_lengths)} tools", file=file)
-        print(f"   Shortest sequence: {min(sequence_lengths)} tools", file=file)
-
     return common_pairs
 
 
-def compare_simulation_performance(results, file=None):
+def compare_simulation_performance(simulations: List[SimulationRun], file=None):
     """Compare performance metrics across different simulations."""
 
     print("\n🏁 Simulation Performance Comparison:", file=file)
     print("-" * 40, file=file)
 
     simulation_metrics = []
-
-    for sim in results.simulations:
+    for sim in simulations:
         if sim.enhanced_logging_enabled and sim.execution_metrics:
             metrics = {
                 'task_id': sim.task_id,
                 'trial': sim.trial or 0,
-                'total_calls': sim.execution_metrics.total_tool_calls,
-                'failed_calls': sim.execution_metrics.failed_tool_calls,
                 'failure_rate': sim.execution_metrics.failed_tool_calls / sim.execution_metrics.total_tool_calls if sim.execution_metrics.total_tool_calls > 0 else 0,
-                'total_time': sim.execution_metrics.total_execution_time_ms,
                 'avg_time': sim.execution_metrics.average_execution_time_ms,
-                'state_changes': sim.execution_metrics.state_changes,
                 'reward': sim.reward_info.reward if sim.reward_info else 0,
-                'termination_reason': sim.termination_reason
             }
             simulation_metrics.append(metrics)
 
@@ -143,220 +110,14 @@ def compare_simulation_performance(results, file=None):
         print("No simulation metrics available", file=file)
         return []
 
-    # Sort by composite performance score (lower failure rate + faster time + higher reward)
-    def performance_score(m):
-        # Lower is better: normalize and combine metrics
-        failure_penalty = m['failure_rate'] * 100  # 0-100
-        time_penalty = min(m['avg_time'] / 1000, 10)  # 0-10 (cap at 10 seconds)
-        reward_bonus = m['reward'] * 10  # Boost for higher rewards
-        return failure_penalty + time_penalty - reward_bonus
-
-    simulation_metrics.sort(key=performance_score)
+    # Sort by performance
+    simulation_metrics.sort(key=lambda m: (m['failure_rate'], m['avg_time'], -m['reward']))
 
     print("Top Performing Simulations:", file=file)
-    print(f"{'Rank':<5} {'Task ID':<12} {'Trial':<6} {'Calls':<6} {'Failures':<9} {'Avg Time':<10} {'Reward':<8} {'Reason'}", file=file)
-    print("-" * 80, file=file)
-
-    for i, metrics in enumerate(simulation_metrics[:10], 1):  # Top 10
-        print(f"{i:<5} "
-              f"{metrics['task_id']:<12} "
-              f"{metrics['trial']:<6} "
-              f"{metrics['total_calls']:<6} "
-              f"{metrics['failure_rate']:<9.1%} "
-              f"{metrics['avg_time']:<10.1f} "
-              f"{metrics['reward']:<8.3f} "
-              f"{metrics['termination_reason']}", file=file)
-
-    # Performance statistics
-    if len(simulation_metrics) > 1:
-        failure_rates = [m['failure_rate'] for m in simulation_metrics]
-        avg_times = [m['avg_time'] for m in simulation_metrics]
-        rewards = [m['reward'] for m in simulation_metrics]
-
-        print(f"\nPerformance Statistics:", file=file)
-        print(f"   Failure rate: {statistics.mean(failure_rates):.1%} ± {statistics.stdev(failure_rates) if len(failure_rates) > 1 else 0:.1%}", file=file)
-        print(f"   Execution time: {statistics.mean(avg_times):.1f}ms ± {statistics.stdev(avg_times) if len(avg_times) > 1 else 0:.1f}ms", file=file)
-        print(f"   Reward: {statistics.mean(rewards):.3f} ± {statistics.stdev(rewards) if len(rewards) > 1 else 0:.3f}", file=file)
+    for metrics in simulation_metrics[:10]:
+        print(f"  Task {metrics['task_id']} (Trial {metrics['trial']}): Fail rate {metrics['failure_rate']:.1%}, Avg time {metrics['avg_time']:.1f}ms, Reward {metrics['reward']:.2f}", file=file)
 
     return simulation_metrics
-
-
-def analyze_error_patterns(results, file=None):
-    """Deep dive into error patterns and correlations."""
-
-    print("\n🐛 Error Pattern Deep Dive:", file=file)
-    print("-" * 30, file=file)
-
-    error_analysis = {
-        'by_tool': defaultdict(list),
-        'by_requestor': defaultdict(list),
-        'by_task': defaultdict(list),
-        'by_arguments': defaultdict(list)
-    }
-
-    for sim in results.simulations:
-        if sim.enhanced_logging_enabled and sim.execution_logs:
-            for log in sim.execution_logs:
-                if not log.success and log.error_details:
-                    error_info = {
-                        'task_id': sim.task_id,
-                        'tool_name': log.tool_name,
-                        'requestor': log.requestor,
-                        'error_details': log.error_details,
-                        'arguments': log.arguments,
-                        'execution_time': log.execution_time_ms
-                    }
-
-                    error_analysis['by_tool'][log.tool_name].append(error_info)
-                    error_analysis['by_requestor'][log.requestor].append(error_info)
-                    error_analysis['by_task'][sim.task_id].append(error_info)
-
-                    # Group similar argument patterns
-                    arg_keys = tuple(sorted(log.arguments.keys())) if log.arguments else ()
-                    error_analysis['by_arguments'][arg_keys].append(error_info)
-
-    # Analysis results
-    total_errors = sum(len(errors) for errors in error_analysis['by_tool'].values())
-    if total_errors == 0:
-        print("✅ No errors found", file=file)
-        return
-
-    print(f"Total errors analyzed: {total_errors}", file=file)
-
-    # Error frequency by tool
-    print(f"\nError frequency by tool:", file=file)
-    tool_errors = [(tool, len(errors)) for tool, errors in error_analysis['by_tool'].items()]
-    for tool, count in sorted(tool_errors, key=lambda x: x[1], reverse=True)[:5]:
-        print(f"   {tool}: {count} errors", file=file)
-
-    # Common error messages
-    all_errors = []
-    for errors in error_analysis['by_tool'].values():
-        all_errors.extend([e['error_details'] for e in errors])
-
-    # Group similar error messages
-    error_types = defaultdict(int)
-    for error in all_errors:
-        # Extract error type (first 50 characters or up to first colon)
-        error_key = error.split(':')[0][:50] if ':' in error else error[:50]
-        error_types[error_key] += 1
-
-    print(f"\nMost common error types:", file=file)
-    for error_type, count in sorted(error_types.items(), key=lambda x: x[1], reverse=True)[:5]:
-        percentage = count / total_errors * 100
-        print(f"   {error_type}: {count} ({percentage:.1f}%)", file=file)
-
-    # Task-specific error patterns
-    task_with_most_errors = max(error_analysis['by_task'].items(), key=lambda x: len(x[1]))
-    print(f"\nTask with most errors: {task_with_most_errors[0]} ({len(task_with_most_errors[1])} errors)", file=file)
-
-    return error_analysis
-
-
-def analyze_success_factors(results, file=None):
-    """Identify factors that correlate with successful simulations."""
-
-    print("\n🎯 Success Factor Analysis:", file=file)
-    print("-" * 30, file=file)
-
-    successful_sims = []
-    failed_sims = []
-
-    for sim in results.simulations:
-        if sim.enhanced_logging_enabled and sim.reward_info:
-            sim_data = {
-                'task_id': sim.task_id,
-                'reward': sim.reward_info.reward,
-                'total_calls': sim.execution_metrics.total_tool_calls if sim.execution_metrics else 0,
-                'failed_calls': sim.execution_metrics.failed_tool_calls if sim.execution_metrics else 0,
-                'avg_time': sim.execution_metrics.average_execution_time_ms if sim.execution_metrics else 0,
-                'state_changes': sim.execution_metrics.state_changes if sim.execution_metrics else 0,
-                'termination_reason': sim.termination_reason,
-                'tools_used': sim.execution_metrics.unique_tools_used if sim.execution_metrics else []
-            }
-
-            # Define success threshold (adjust as needed)
-            if sim.reward_info.reward > 0.8:  # >80% reward
-                successful_sims.append(sim_data)
-            else:
-                failed_sims.append(sim_data)
-
-    if not successful_sims and not failed_sims:
-        print("Insufficient data for success factor analysis", file=file)
-        return
-
-    print(f"Successful simulations: {len(successful_sims)}", file=file)
-    print(f"Failed simulations: {len(failed_sims)}", file=file)
-
-    if successful_sims and failed_sims:
-        # Compare characteristics
-        def avg_metric(sims, metric):
-            values = [s[metric] for s in sims if isinstance(s[metric], (int, float))]
-            return statistics.mean(values) if values else 0
-
-        print(f"\nCharacteristic Comparison:", file=file)
-        print(f"{'Metric':<20} {'Successful':<12} {'Failed':<12} {'Difference'}", file=file)
-        print("-" * 55, file=file)
-
-        metrics = ['total_calls', 'failed_calls', 'avg_time', 'state_changes']
-        for metric in metrics:
-            success_avg = avg_metric(successful_sims, metric)
-            failed_avg = avg_metric(failed_sims, metric)
-            diff = success_avg - failed_avg
-
-            print(f"{metric:<20} {success_avg:<12.1f} {failed_avg:<12.1f} {diff:+12.1f}", file=file)
-
-    # Common tools in successful simulations
-    if successful_sims:
-        successful_tools = []
-        for sim in successful_sims:
-            successful_tools.extend(sim['tools_used'])
-
-        if successful_tools:
-            tool_freq = Counter(successful_tools)
-            print(f"\nMost common tools in successful simulations:", file=file)
-            for tool, count in tool_freq.most_common(5):
-                percentage = count / len(successful_sims) * 100
-                print(f"   {tool}: {count}/{len(successful_sims)} ({percentage:.1f}%)", file=file)
-
-    return successful_sims, failed_sims
-
-
-def generate_custom_report(results, analysis_results, file=None):
-    """Generate a comprehensive custom analysis report."""
-
-    print("\n📋 Custom Analysis Summary:", file=file)
-    print("=" * 40, file=file)
-
-    timeouts, patterns, performance, errors, success_data = analysis_results
-
-    # Key insights
-    insights = []
-
-    if timeouts:
-        insights.append(f"🔴 Found {len(timeouts)} timeout issues across {len(set(t['tool_name'] for t in timeouts))} different tools")
-
-    if patterns:
-        most_common_pattern = patterns[0]
-        insights.append(f"🔗 Most common tool sequence: {most_common_pattern[0][0]} → {most_common_pattern[0][1]} ({most_common_pattern[1]} times)")
-
-    if performance:
-        best_sim = performance[0]
-        insights.append(f"🏆 Best performing simulation: Task {best_sim['task_id']} with {best_sim['failure_rate']:.1%} failure rate")
-
-    if success_data:
-        successful_sims, failed_sims = success_data
-        success_rate = len(successful_sims) / (len(successful_sims) + len(failed_sims)) * 100
-        insights.append(f"📊 Overall success rate: {success_rate:.1f}% ({len(successful_sims)} successful)")
-
-    print("Key Insights:", file=file)
-    for insight in insights:
-        print(f"   {insight}", file=file)
-
-    if not insights:
-        print("   ✅ No significant issues or patterns identified", file=file)
-
-    return insights
 
 
 def main():
@@ -364,75 +125,35 @@ def main():
 
     if len(sys.argv) != 2:
         print("Usage: python scripts/custom_analysis.py <results_file.json>")
-        print("\nExample:")
-        print("  python scripts/custom_analysis.py data/simulations/my_results.json")
         sys.exit(1)
 
     results_file = Path(sys.argv[1])
-
     if not results_file.exists():
         print(f"❌ Results file not found: {results_file}")
         sys.exit(1)
 
     try:
-        # Load simulation results
         print(f"🔍 Running custom analysis on: {results_file}")
-        results = Results.load(str(results_file))
+        simulations = list(Results.stream_simulations(results_file))
 
-        # Check if enhanced logging data is available
-        enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-        if not enhanced_sims:
+        if not any(sim.enhanced_logging_enabled for sim in simulations):
             print("❌ No enhanced logging data found in results!")
-            print("Run simulations with --enhanced-logging flag to enable custom analysis")
             return
 
         print("=" * 80)
-
-        # In-memory buffer to capture detailed report
         report_buffer = io.StringIO()
 
         # Run all custom analyses
-        timeouts = find_timeout_patterns(results, file=report_buffer)
-        patterns = analyze_tool_usage_patterns(results, file=report_buffer)
-        performance = compare_simulation_performance(results, file=report_buffer)
-        errors = analyze_error_patterns(results, file=report_buffer)
-        success_data = analyze_success_factors(results, file=report_buffer)
+        find_timeout_patterns(simulations, file=report_buffer)
+        analyze_tool_usage_patterns(simulations, file=report_buffer)
+        compare_simulation_performance(simulations, file=report_buffer)
 
-        # Generate summary report
-        analysis_results = (timeouts, patterns, performance, errors, success_data)
-        insights = generate_custom_report(results, analysis_results, file=report_buffer)
-
-        # Get report content and print to console
         report_content = report_buffer.getvalue()
         print(report_content)
 
-        # Save detailed text report
         output_txt_file = results_file.parent / f"{results_file.stem}_custom_analysis.txt"
-        with open(output_txt_file, 'w') as f:
-            f.write("CUSTOM ANALYSIS REPORT\n")
-            f.write("=" * 40 + "\n\n")
-            f.write(f"Results file: {results_file}\n\n")
-            f.write(report_content)
-        
+        output_txt_file.write_text(report_content)
         print(f"\n💾 Custom analysis report saved to: {output_txt_file}")
-
-        # Save comprehensive analysis to JSON
-        output_data = {
-            'file_analyzed': str(results_file),
-            'total_simulations': len(results.simulations),
-            'enhanced_simulations': len(enhanced_sims),
-            'insights': insights,
-            'timeout_issues': len(timeouts) if timeouts else 0,
-            'tool_patterns': len(patterns) if patterns else 0,
-            'performance_rankings': len(performance) if performance else 0,
-            'error_categories': len(errors['by_tool']) if errors else 0
-        }
-
-        output_json_file = results_file.parent / f"{results_file.stem}_custom_analysis.json"
-        with open(output_json_file, 'w') as f:
-            json.dump(output_data, f, indent=2, default=str)
-
-        print(f"💾 Custom analysis results saved to: {output_json_file}")
 
     except Exception as e:
         print(f"❌ Error running custom analysis: {e}")

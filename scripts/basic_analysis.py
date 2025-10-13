@@ -5,6 +5,9 @@ Basic Analysis Script - Generate comprehensive execution report
 This script demonstrates the simplest way to analyze enhanced logging data
 from tau2-bench simulations using the built-in analysis tools.
 
+This version is optimized to handle large results files by streaming simulations
+instead of loading them all into memory at once.
+
 Usage:
     python scripts/basic_analysis.py <results_file.json>
 """
@@ -37,23 +40,18 @@ def main():
         sys.exit(1)
 
     try:
-        # Load simulation results
-        print(f"📊 Loading results from: {results_file}")
-        results = Results.load(str(results_file))
+        # Stream simulation results to avoid high memory usage
+        print(f"📊 Streaming results from: {results_file}")
+        simulations_stream = Results.stream_simulations(results_file)
 
-        # Check if enhanced logging data is available
-        enhanced_sims = [sim for sim in results.simulations if sim.enhanced_logging_enabled]
-        if not enhanced_sims:
-            print("❌ No enhanced logging data found in results!")
-            print("\n💡 To enable enhanced logging, run simulations with:")
-            print("  tau2 run --enhanced-logging [other options...]")
+        # Generate comprehensive analysis report from the stream
+        report = generate_execution_report(simulations_stream)
+        
+        if "No enhanced logging data found" in report:
+            print(f"⚠️ {report}")
             return
 
-        print(f"✅ Found {len(enhanced_sims)} simulations with enhanced logging data")
         print("=" * 60)
-
-        # Generate comprehensive analysis report
-        report = generate_execution_report(results)
         print(report)
 
         # Save report to file
